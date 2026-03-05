@@ -23,128 +23,233 @@
                 <p>{% trans "No members currently need review." %}</p>
             </div>
             {% else %}
-            <div class="accordion" id="reviewAccordion">
-                {% for member in members %}
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="heading-{{ member.user.pk }}">
-                        <button class="accordion-button collapsed" type="button"
-                                data-bs-toggle="collapse" data-bs-target="#collapse-{{ member.user.pk }}"
-                                aria-expanded="false" aria-controls="collapse-{{ member.user.pk }}">
-                            <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>{% trans "Character" %}</th>
+                            <th>{% trans "Rank" %}</th>
+                            <th>{% trans "Service" %}</th>
+                            <th>{% trans "Overdue" %}</th>
+                            <th>{% trans "Status" %}</th>
+                            <th>{% trans "Checklist" %}</th>
+                            <th>{% trans "Tags" %}</th>
+                            <th class="text-end">{% trans "Actions" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member in members %}
+                        <tr>
+                            <td>
                                 <img src="{% eve_image 'character' member.main.character_id 32 %}"
                                      alt="{{ member.main.character_name }}"
                                      class="rounded" width="32" height="32" loading="lazy">
-                                <strong>{{ member.main.character_name }}</strong>
+                            </td>
+                            <td>
+                                <a href="{% url 'codex:member_detail' member.user.pk %}" class="text-decoration-none">
+                                    <strong>{{ member.main.character_name }}</strong>
+                                </a>
+                            </td>
+                            <td>
                                 {% if member.rank %}
                                 <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.service_length %}
+                                {{ member.service_length }}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.days_overdue > 0 %}
+                                <span class="text-danger fw-bold">{{ member.days_overdue }}d</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.review_due %}
+                                <span class="badge bg-danger">
+                                    <i class="fa-solid fa-clock"></i> {% trans "Review Due" %}
+                                </span>
                                 {% endif %}
                                 {% if member.rank_mismatch %}
                                 <span class="badge bg-warning text-dark">
                                     <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Rank Mismatch" %}
                                 </span>
                                 {% endif %}
-                                {% if member.review_due %}
-                                <span class="badge bg-danger">
-                                    <i class="fa-solid fa-clock"></i> {% trans "Review Due" %}
-                                </span>
-                                {% endif %}
                                 {% if member.incomplete_checklist %}
                                 <span class="badge bg-secondary">
-                                    <i class="fa-solid fa-list-check"></i> {% trans "Incomplete Checklist" %}
+                                    <i class="fa-solid fa-list-check"></i> {% trans "Incomplete" %}
                                 </span>
                                 {% endif %}
+                            </td>
+                            <td>
+                                {% if member.checklist_items %}
+                                {% with total=member.checklist_items|length %}
+                                {% completed_count member.checklist_items as done %}
+                                <span class="{% if done == total %}text-success{% else %}text-warning{% endif %}">
+                                    {{ done }}/{{ total }}
+                                </span>
+                                {% endwith %}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
                                 {% for tag in member.tags %}
                                 <span class="badge bg-{{ tag.color }}">{{ tag.name }}</span>
                                 {% endfor %}
-                                <small class="text-muted ms-2">{{ member.service_length }}</small>
-                            </div>
-                        </button>
-                    </h2>
-                    <div id="collapse-{{ member.user.pk }}" class="accordion-collapse collapse"
-                         aria-labelledby="heading-{{ member.user.pk }}" data-bs-parent="#reviewAccordion">
-                        <div class="accordion-body">
-                            {% if member.rank_mismatch %}
-                            <div class="alert alert-warning py-2">
-                                <i class="fa-solid fa-triangle-exclamation"></i>
-                                {% trans "This member has different ranks across characters:" %}
-                                {% for r in member.all_ranks %}
-                                <span class="badge bg-info">{{ r.display_label }}</span>
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-
-                            {% if member.checklist_items %}
-                            <h6>{% trans "Checklist" %}</h6>
-                            <div class="list-group mb-3">
-                                {% for ci in member.checklist_items %}
-                                <div class="list-group-item d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <form method="post" action="{% url 'codex:toggle_checklist' member.user.pk ci.item.pk %}" class="d-inline">
-                                            {% csrf_token %}
-                                            <button type="submit" class="btn btn-sm {% if ci.completion %}btn-success{% else %}btn-outline-secondary{% endif %} me-2">
-                                                <i class="fa-solid {% if ci.completion %}fa-check-square{% else %}fa-square{% endif %}"></i>
-                                            </button>
-                                        </form>
-                                        {{ ci.item.name }}
-                                    </div>
-                                    {% if ci.completion %}
-                                    <small class="text-muted">
-                                        {% blocktrans with who=ci.completion.completed_by|main_character_name when=ci.completion.completed_at|date:"Y-m-d" %}
-                                        Completed by {{ who }} on {{ when }}
-                                        {% endblocktrans %}
-                                    </small>
-                                    {% endif %}
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-
-                            {% if member.review_due %}
-                            <h6>{% trans "Acknowledge Review" %}</h6>
-                            <form method="post" action="{% url 'codex:acknowledge_review' member.user.pk %}" class="mb-3">
-                                {% csrf_token %}
-                                <div class="input-group">
-                                    <input type="text" name="note" class="form-control" placeholder="{% trans 'Reason for extending (required)' %}" required>
-                                    <button type="submit" class="btn btn-warning">
-                                        <i class="fa-solid fa-clock-rotate-left"></i> {% trans "Acknowledge & Snooze" %}
-                                    </button>
-                                </div>
-                            </form>
-                            {% endif %}
-
-                            {% if member.acknowledgements %}
-                            <h6>{% trans "Acknowledgement History" %}</h6>
-                            <div class="table-responsive">
-                                <table class="table table-sm table-bordered mb-0">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>{% trans "Date" %}</th>
-                                            <th>{% trans "By" %}</th>
-                                            <th>{% trans "Rank" %}</th>
-                                            <th>{% trans "Note" %}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for ack in member.acknowledgements %}
-                                        <tr>
-                                            <td>{{ ack.acknowledged_at|date:"Y-m-d H:i" }}</td>
-                                            <td>{{ ack.acknowledged_by|main_character_name }}</td>
-                                            <td><span class="badge bg-info">{{ ack.rank.display_label }}</span></td>
-                                            <td>{{ ack.note }}</td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-                {% endfor %}
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-info" type="button"
+                                        data-bs-toggle="modal" data-bs-target="#detailModal-{{ member.user.pk }}"
+                                        title="{% trans 'Details' %}">
+                                    <i class="fa-solid fa-list-check"></i>
+                                </button>
+                                <button class="btn btn-sm btn-warning" type="button"
+                                        data-bs-toggle="modal" data-bs-target="#snoozeModal-{{ member.user.pk }}"
+                                        title="{% trans 'Snooze Review' %}">
+                                    <i class="fa-solid fa-clock-rotate-left"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
             {% endif %}
         </div>
     </div>
     {% endif %}
 </div>
+
+{% for member in members %}
+<!-- Detail Modal -->
+<div class="modal fade" id="detailModal-{{ member.user.pk }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="d-flex align-items-center gap-2">
+                    <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                         alt="{{ member.main.character_name }}"
+                         class="rounded" width="32" height="32">
+                    <h5 class="modal-title">{{ member.main.character_name }}</h5>
+                    {% if member.rank %}
+                    <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                    {% endif %}
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% if member.rank_mismatch %}
+                <div class="alert alert-warning py-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    {% trans "This member has different ranks across characters:" %}
+                    {% for r in member.all_ranks %}
+                    <span class="badge bg-info">{{ r.display_label }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if member.checklist_items %}
+                <h6>{% trans "Checklist" %}</h6>
+                <div class="list-group mb-3">
+                    {% for ci in member.checklist_items %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <form method="post" action="{% url 'codex:toggle_checklist' member.user.pk ci.item.pk %}" class="d-inline">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm {% if ci.completion %}btn-success{% else %}btn-outline-secondary{% endif %} me-2">
+                                    <i class="fa-solid {% if ci.completion %}fa-check-square{% else %}fa-square{% endif %}"></i>
+                                </button>
+                            </form>
+                            {{ ci.item.name }}
+                        </div>
+                        {% if ci.completion %}
+                        <small class="text-muted">
+                            {% blocktrans with who=ci.completion.completed_by|main_character_name when=ci.completion.completed_at|date:"Y-m-d" %}
+                            Completed by {{ who }} on {{ when }}
+                            {% endblocktrans %}
+                        </small>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if member.acknowledgements %}
+                <h6>{% trans "Acknowledgement History" %}</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>{% trans "Date" %}</th>
+                                <th>{% trans "By" %}</th>
+                                <th>{% trans "Rank" %}</th>
+                                <th>{% trans "Note" %}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ack in member.acknowledgements %}
+                            <tr>
+                                <td>{{ ack.acknowledged_at|date:"Y-m-d H:i" }}</td>
+                                <td>{{ ack.acknowledged_by|main_character_name }}</td>
+                                <td><span class="badge bg-info">{{ ack.rank.display_label }}</span></td>
+                                <td>{{ ack.note }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{% trans "Close" %}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Snooze Modal -->
+<div class="modal fade" id="snoozeModal-{{ member.user.pk }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="d-flex align-items-center gap-2">
+                    <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                         alt="{{ member.main.character_name }}"
+                         class="rounded" width="24" height="24">
+                    <h5 class="modal-title">{% trans "Snooze Review" %} &mdash; {{ member.main.character_name }}</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" action="{% url 'codex:acknowledge_review' member.user.pk %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <p class="text-muted mb-3">
+                        {% trans "Acknowledge this member's review and reset the review timer. A reason is required." %}
+                    </p>
+                    <div class="mb-0">
+                        <label for="snoozeNote-{{ member.user.pk }}" class="form-label">{% trans "Reason" %}</label>
+                        <input type="text" name="note" id="snoozeNote-{{ member.user.pk }}"
+                               class="form-control" placeholder="{% trans 'Reason for extending...' %}" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{% trans "Cancel" %}</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="fa-solid fa-clock-rotate-left"></i> {% trans "Acknowledge & Snooze" %}
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
 {% endblock %}

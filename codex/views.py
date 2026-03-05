@@ -119,6 +119,27 @@ def _is_review_due(rank, service_days, user, acknowledgements_by_user):
     )
 
 
+def _days_overdue(rank, service_days, user, acknowledgements_by_user):
+    """Return how many days overdue a review is, or 0 if not due."""
+    if not rank or service_days < rank.review_threshold_days:
+        return 0
+
+    acks = acknowledgements_by_user.get(user.pk, [])
+    latest_ack = None
+    for ack in acks:
+        if ack.rank_id == rank.pk:
+            if latest_ack is None or ack.acknowledged_at > latest_ack.acknowledged_at:
+                latest_ack = ack
+
+    if latest_ack is None:
+        # Overdue since they crossed the threshold
+        return service_days - rank.review_threshold_days
+
+    elapsed = (timezone.now() - latest_ack.acknowledged_at).days
+    overdue = elapsed - rank.review_threshold_days
+    return max(overdue, 0)
+
+
 def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user=None):
     """Build the member list with rank detection and review flags."""
     if tags_by_user is None:
@@ -145,6 +166,7 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
         service_length, service_date, service_days = _compute_service(main)
         rank, rank_mismatch, all_ranks = detect_member_rank(main, alts, ranks_by_title)
         review_due = _is_review_due(rank, service_days, user, acknowledgements_by_user)
+        days_overdue = _days_overdue(rank, service_days, user, acknowledgements_by_user)
 
         members.append(
             {
@@ -160,6 +182,7 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
                 "rank_mismatch": rank_mismatch,
                 "all_ranks": all_ranks,
                 "review_due": review_due,
+                "days_overdue": days_overdue,
                 "tags": tags_by_user.get(user.pk, []),
             }
         )
@@ -498,6 +521,8 @@ def review(request):
 
         if m["review_due"] or m["rank_mismatch"] or incomplete_checklist:
             flagged.append(m)
+
+    flagged.sort(key=lambda m: m["days_overdue"], reverse=True)
 
     return render(
         request,

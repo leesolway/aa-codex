@@ -23,6 +23,12 @@ def eve_image(category, entity_id, size=32):
     return ""
 
 
+@register.simple_tag
+def completed_count(checklist_items):
+    """Return the number of completed checklist items."""
+    return sum(1 for ci in checklist_items if ci["completion"])
+
+
 @register.filter
 def main_character_name(user):
     """Return the user's main character name, or username as fallback."""
