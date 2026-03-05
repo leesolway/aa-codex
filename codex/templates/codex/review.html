@@ -17,6 +17,24 @@
             <span class="badge bg-warning text-dark">{{ member_count }} {% trans "flagged" %}</span>
         </div>
         <div class="card-body p-0">
+            {% if available_ranks|length > 1 %}
+            <div class="p-3 pb-0 d-flex align-items-center gap-2 flex-wrap">
+                <span class="small text-muted fw-bold">{% trans "Rank:" %}</span>
+                {% for rank in available_ranks %}
+                <button type="button"
+                    class="btn btn-sm rank-filter-toggle {% if rank.pk in active_rank_ids %}btn-info{% else %}btn-secondary{% endif %}"
+                    data-rank-id="{{ rank.pk }}">
+                    {{ rank.display_label }}
+                </button>
+                {% endfor %}
+                {% if has_active_filters %}
+                <a href="{% url 'codex:review' %}" class="btn btn-sm btn-danger ms-1">
+                    <i class="fa-solid fa-xmark"></i> {% trans "Clear" %}
+                </a>
+                <span class="text-muted small ms-1">{% trans "Showing" %} {{ filtered_count }} {% trans "of" %} {{ member_count }}</span>
+                {% endif %}
+            </div>
+            {% endif %}
             {% if not members %}
             <div class="p-4 text-center text-muted">
                 <i class="fa-solid fa-check-circle fa-2x mb-2"></i>
@@ -252,4 +270,29 @@
     </div>
 </div>
 {% endfor %}
+{% endblock %}
+
+{% block extra_javascript %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll(".rank-filter-toggle").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            const value = this.dataset.rankId;
+            const params = new URLSearchParams(window.location.search);
+            const current = params.getAll("rank");
+            const idx = current.indexOf(value);
+
+            params.delete("rank");
+            if (idx === -1) {
+                current.push(value);
+            } else {
+                current.splice(idx, 1);
+            }
+            current.forEach(function(v) { params.append("rank", v); });
+
+            window.location.search = params.toString();
+        });
+    });
+});
+</script>
 {% endblock %}

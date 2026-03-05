@@ -550,13 +550,28 @@ def review(request):
 
     flagged.sort(key=lambda m: m["days_overdue"], reverse=True)
 
+    # Collect ranks the user is permitted to see for filter options
+    available_ranks = Rank.objects.filter(review_tier__in=user_tiers).order_by("priority")
+
+    # Apply rank filter
+    active_rank_ids = [int(x) for x in request.GET.getlist("rank") if x.isdigit()]
+    total_flagged = len(flagged)
+
+    if active_rank_ids:
+        rank_id_set = set(active_rank_ids)
+        flagged = [m for m in flagged if m["rank"] and m["rank"].pk in rank_id_set]
+
     return render(
         request,
         "codex/review.html",
         {
             "members": flagged,
             "state": config.aa_state,
-            "member_count": len(flagged),
+            "member_count": total_flagged,
+            "filtered_count": len(flagged),
+            "available_ranks": available_ranks,
+            "active_rank_ids": active_rank_ids,
+            "has_active_filters": bool(active_rank_ids),
         },
     )
 
