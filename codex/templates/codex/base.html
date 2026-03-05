@@ -1,0 +1,36 @@
+{% extends "allianceauth/base-bs5.html" %}
+
+{% load i18n %}
+
+{% block page_title %}
+    {% translate "Corp Codex" %}
+{% endblock page_title %}
+
+{% block header_nav_brand %}
+    {% translate "Corp Codex" %}
+{% endblock header_nav_brand %}
+
+{% block header_nav_collapse_left %}
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'codex:index' %}">
+            {% translate "Members" %}
+        </a>
+    </li>
+    {% if perms.codex.manage_reviews_r1 or perms.codex.manage_reviews_r2 or perms.codex.manage_reviews_r3 %}
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'codex:review' %}">
+            {% translate "Reviews" %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'codex:former_members' %}">
+            {% translate "Former Members" %}
+        </a>
+    </li>
+    {% endif %}
+{% endblock header_nav_collapse_left %}
+
+{% block content %}
+    {% block codex_content %}
+    {% endblock codex_content %}
+{% endblock content %}

@@ -1,0 +1,24 @@
+from django.urls import path
+
+from . import views
+
+app_name = "codex"
+
+urlpatterns = [
+    path("", views.index, name="index"),
+    path("review/", views.review, name="review"),
+    path(
+        "review/toggle/<int:user_id>/<int:item_id>/",
+        views.toggle_checklist,
+        name="toggle_checklist",
+    ),
+    path(
+        "review/acknowledge/<int:user_id>/",
+        views.acknowledge_review,
+        name="acknowledge_review",
+    ),
+    path("former/", views.former_members, name="former_members"),
+    path("tags/", views.manage_tags, name="manage_tags"),
+    path("member/<int:user_id>/", views.member_detail, name="member_detail"),
+    path("member/<int:user_id>/note/", views.add_note, name="add_note"),
+]

@@ -1,0 +1,113 @@
+{% extends 'codex/base.html' %}
+{% load i18n %}
+{% load codex_tags %}
+
+{% block page_title %}{% trans "Former Members" %} - {% trans "Corporation Codex" %}{% endblock %}
+
+{% block codex_content %}
+<div class="container-fluid mt-3">
+    {% if not state %}
+    <div class="alert alert-warning">
+        {% trans "No state has been configured for the Corporation Codex. An administrator must set the state in the admin panel." %}
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{% trans "Former Members" %}</h5>
+            <span class="badge bg-warning">{{ member_count }} {% trans "former" %}</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="p-3 pb-0">
+                <input type="text" id="memberSearch" class="form-control" placeholder="{% trans 'Search former members and alts...' %}">
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>{% trans "Character" %}</th>
+                            <th>{% trans "Corporation" %}</th>
+                            <th>{% trans "Tags" %}</th>
+                            <th class="text-center">{% trans "Alts" %}</th>
+                            <th class="text-center">{% trans "Links" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="memberTableBody">
+                        {% for member in members %}
+                        <tr class="member-row" style="cursor: pointer;"
+                            onclick="window.location='{% url 'codex:member_detail' member.user.pk %}'"
+                            data-alt-names="{% for alt in member.alts %}{{ alt.character_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                            <td>
+                                {% if member.character_id %}
+                                <img src="{% eve_image 'character' member.character_id 32 %}"
+                                     alt="{{ member.character_name }}"
+                                     class="rounded" width="32" height="32" loading="lazy">
+                                {% else %}
+                                <span class="rounded d-inline-block bg-secondary" style="width:32px;height:32px;"></span>
+                                {% endif %}
+                            </td>
+                            <td class="member-name">{{ member.character_name }}</td>
+                            <td>
+                                {% if member.corporation_id %}
+                                <img src="{% eve_image 'corporation' member.corporation_id 32 %}"
+                                     alt="{{ member.corporation_name }}"
+                                     class="rounded" width="20" height="20" loading="lazy">
+                                {{ member.corporation_name }}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% for tag in member.tags %}
+                                <span class="badge bg-{{ tag.color }}">{{ tag.name }}</span>
+                                {% endfor %}
+                            </td>
+                            <td class="text-center">
+                                {% if member.alt_count > 0 %}
+                                <a href="{% url 'codex:member_detail' member.user.pk %}" onclick="event.stopPropagation();">
+                                    <span class="badge bg-secondary">{{ member.alt_count }}</span>
+                                </a>
+                                {% else %}
+                                <span class="text-muted">0</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if member.character_id %}
+                                <a href="https://zkillboard.com/character/{{ member.character_id }}/"
+                                   target="_blank" rel="noopener noreferrer"
+                                   title="zKillboard" onclick="event.stopPropagation();">
+                                    <i class="fa-solid fa-skull-crossbones"></i>
+                                </a>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_javascript %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const searchInput = document.getElementById("memberSearch");
+    if (!searchInput) return;
+
+    searchInput.addEventListener("input", function() {
+        const term = this.value.toLowerCase();
+        const rows = document.querySelectorAll("#memberTableBody .member-row");
+        rows.forEach(function(row) {
+            const name = row.querySelector(".member-name").textContent.toLowerCase();
+            const altNames = (row.getAttribute("data-alt-names") || "").toLowerCase();
+            row.style.display = (name.includes(term) || altNames.includes(term)) ? "" : "none";
+        });
+    });
+});
+</script>
+{% endblock %}

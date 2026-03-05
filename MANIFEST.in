@@ -1,0 +1,3 @@
+include README.md
+recursive-include codex/templates *
+recursive-include codex/static *

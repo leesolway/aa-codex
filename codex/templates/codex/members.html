@@ -1,0 +1,366 @@
+{% extends 'codex/base.html' %}
+{% load i18n %}
+{% load codex_tags %}
+
+{% block page_title %}{% trans "Corporation Codex" %}{% endblock %}
+
+{% block codex_content %}
+<div class="container-fluid mt-3">
+    {% if not state %}
+    <div class="alert alert-warning">
+        {% trans "No state has been configured for the Corporation Codex. An administrator must set the state in the admin panel." %}
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{% trans "Corporation Members" %}</h5>
+            <span class="badge bg-primary">{{ member_count }} {% trans "members" %}</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="p-3 pb-0">
+                <input type="text" id="memberSearch" class="form-control" placeholder="{% trans 'Search members and alts on this page...' %}">
+            </div>
+
+            <!-- Filter Toggle -->
+            <div class="p-3 pb-0">
+                <button class="btn btn-sm {% if has_active_filters %}btn-primary{% else %}btn-secondary{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#filterPanel" aria-expanded="{{ has_active_filters|yesno:'true,false' }}">
+                    <i class="fa-solid fa-filter"></i> {% trans "Filters" %}
+                    {% if has_active_filters %}
+                    <span class="badge bg-light text-dark ms-1">{% trans "Active" %}</span>
+                    {% endif %}
+                </button>
+                {% if has_active_filters %}
+                <a href="{% url 'codex:index' %}" class="btn btn-sm btn-danger ms-1">
+                    <i class="fa-solid fa-xmark"></i> {% trans "Clear All" %}
+                </a>
+                <span class="text-muted ms-2 small">{% trans "Showing" %} {{ filtered_count }} {% trans "of" %} {{ member_count }}</span>
+                {% endif %}
+            </div>
+
+            <!-- Filter Panel -->
+            <div class="collapse {% if has_active_filters %}show{% endif %} p-3 pb-0" id="filterPanel">
+                <div class="card card-body bg-dark border-secondary">
+                    <div class="row g-3">
+                        {% if all_tags %}
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-muted">{% trans "Tags" %}</label>
+                            <div class="d-flex flex-wrap gap-1">
+                                {% for tag in all_tags %}
+                                <button type="button"
+                                    class="btn btn-sm filter-toggle {% if tag.pk in active_tag_ids %}btn-{{ tag.color }}{% else %}btn-secondary{% endif %}"
+                                    data-filter-type="tag" data-filter-value="{{ tag.pk }}">
+                                    {{ tag.name }}
+                                </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if all_ranks %}
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold small text-muted">{% trans "Rank" %}</label>
+                            <div class="d-flex flex-wrap gap-1">
+                                {% for rank in all_ranks %}
+                                <button type="button"
+                                    class="btn btn-sm filter-toggle {% if rank.pk in active_rank_ids %}btn-info{% else %}btn-secondary{% endif %}"
+                                    data-filter-type="rank" data-filter-value="{{ rank.pk }}">
+                                    {{ rank.display_label }}
+                                </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <div class="col-md-2">
+                            <label class="form-label fw-bold small text-muted">{% trans "Title" %}</label>
+                            <input type="text" id="titleFilter" class="form-control form-control-sm"
+                                   placeholder="{% trans 'Search titles...' %}"
+                                   value="{{ title_filter }}">
+                        </div>
+
+                        {% if all_groups %}
+                        <div class="col-md-3">
+                            <label class="form-label fw-bold small text-muted">{% trans "Auth Groups" %}</label>
+                            <div class="d-flex flex-wrap gap-1" style="max-height: 120px; overflow-y: auto;">
+                                {% for group in all_groups %}
+                                <button type="button"
+                                    class="btn btn-sm filter-toggle {% if group.pk in active_group_ids %}btn-warning{% else %}btn-secondary{% endif %}"
+                                    data-filter-type="group" data-filter-value="{{ group.pk }}">
+                                    {{ group.name }}
+                                </button>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>{% trans "Character" %}</th>
+                            <th>{% trans "Corporation" %}</th>
+                            <th>{% trans "Alliance" %}</th>
+                            <th>{% trans "Titles" %}</th>
+                            <th>{% trans "Rank" %}</th>
+                            <th>{% trans "Tags" %}</th>
+                            <th>{% trans "Service" %}</th>
+                            <th class="text-center">{% trans "Alts" %}</th>
+                            <th class="text-center">{% trans "Links" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody id="memberTableBody">
+                        {% for member in page_obj %}
+                        <tr class="member-row" style="cursor: pointer;"
+                            onclick="window.location='{% url 'codex:member_detail' member.user.pk %}'"
+                            data-alt-names="{% for alt in member.alts %}{{ alt.character_name }}{% if not forloop.last %}, {% endif %}{% endfor %}">
+                            <td>
+                                <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                                     alt="{{ member.main.character_name }}"
+                                     class="rounded" width="32" height="32" loading="lazy">
+                            </td>
+                            <td class="member-name">{{ member.main.character_name }}</td>
+                            <td>
+                                <img src="{% eve_image 'corporation' member.main.corporation_id 32 %}"
+                                     alt="{{ member.main.corporation_name }}"
+                                     class="rounded" width="20" height="20" loading="lazy">
+                                {{ member.main.corporation_name }}
+                            </td>
+                            <td>
+                                {% if member.main.alliance_id %}
+                                <img src="{% eve_image 'alliance' member.main.alliance_id 32 %}"
+                                     alt="{{ member.main.alliance_name }}"
+                                     class="rounded" width="20" height="20" loading="lazy">
+                                {{ member.main.alliance_name }}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.titles %}
+                                <small>{{ member.titles }}</small>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.rank %}
+                                <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                                {% if member.rank_mismatch %}
+                                <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch across characters' %}"></i>
+                                {% endif %}
+                                {% if member.review_due %}
+                                <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>
+                                {% endif %}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% for tag in member.tags %}
+                                <span class="badge bg-{{ tag.color }}">{{ tag.name }}</span>
+                                {% endfor %}
+                                {% if member.user.pk == request.user.pk or perms.codex.manage_tags %}
+                                <a href="{% url 'codex:manage_tags' %}?user_id={{ member.user.pk }}"
+                                   onclick="event.stopPropagation();"
+                                   title="{% trans 'Manage Tags' %}" class="ms-1">
+                                    <i class="fa-solid fa-pencil fa-xs text-muted"></i>
+                                </a>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.service_length %}
+                                <span title="Since {{ member.service_date|date:'Y-m-d' }}">{{ member.service_length }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {% if member.alt_count > 0 %}
+                                <a href="{% url 'codex:member_detail' member.user.pk %}" onclick="event.stopPropagation();">
+                                    <span class="badge bg-secondary">{{ member.alt_count }}</span>
+                                </a>
+                                {% else %}
+                                <span class="text-muted">0</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                <a href="https://zkillboard.com/character/{{ member.main.character_id }}/"
+                                   target="_blank" rel="noopener noreferrer"
+                                   title="zKillboard" onclick="event.stopPropagation();">
+                                    <i class="fa-solid fa-skull-crossbones"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="10" class="text-center text-muted py-4">
+                                {% if has_active_filters %}
+                                {% trans "No members match the current filters." %}
+                                <a href="{% url 'codex:index' %}">{% trans "Clear filters" %}</a>
+                                {% else %}
+                                {% trans "No members found." %}
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if page_obj.paginator.num_pages > 1 %}
+            <div class="d-flex justify-content-between align-items-center p-3">
+                <small class="text-muted">
+                    {% trans "Showing" %}
+                    {{ page_obj.start_index }}-{{ page_obj.end_index }}
+                    {% trans "of" %} {{ filtered_count }}
+                    {% trans "members" %}
+                </small>
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ filter_query }}{% if filter_query %}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo;</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+                        {% endif %}
+
+                        {% for num in page_obj.paginator.page_range %}
+                            {% if page_obj.number == num %}
+                            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                            {% elif num > page_obj.number|add:"-3" and num < page_obj.number|add:"3" %}
+                            <li class="page-item">
+                                <a class="page-link" href="?{{ filter_query }}{% if filter_query %}&{% endif %}page={{ num }}">{{ num }}</a>
+                            </li>
+                            {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                            <li class="page-item">
+                                <a class="page-link" href="?{{ filter_query }}{% if filter_query %}&{% endif %}page={{ num }}">{{ num }}</a>
+                            </li>
+                            {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
+                            <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{{ filter_query }}{% if filter_query %}&{% endif %}page={{ page_obj.next_page_number }}">&raquo;</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_javascript %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // Client-side search within current page
+    const searchInput = document.getElementById("memberSearch");
+    if (searchInput) {
+        searchInput.addEventListener("input", function() {
+            const term = this.value.toLowerCase();
+            const rows = document.querySelectorAll("#memberTableBody .member-row");
+            rows.forEach(function(row) {
+                const nameCell = row.querySelector(".member-name");
+                const name = nameCell.textContent.toLowerCase();
+                const altNamesRaw = row.getAttribute("data-alt-names") || "";
+                const altNames = altNamesRaw.toLowerCase();
+
+                const existing = nameCell.querySelector(".alt-match-indicator");
+                if (existing) existing.remove();
+
+                if (!term) {
+                    row.style.display = "";
+                    return;
+                }
+
+                const nameMatch = name.includes(term);
+                const altMatch = altNames.includes(term);
+
+                if (nameMatch || altMatch) {
+                    row.style.display = "";
+                    if (!nameMatch && altMatch) {
+                        const alts = altNamesRaw.split(", ");
+                        const matched = alts.filter(function(a) {
+                            return a.toLowerCase().includes(term);
+                        });
+                        if (matched.length > 0) {
+                            const indicator = document.createElement("div");
+                            indicator.className = "alt-match-indicator text-muted small";
+                            indicator.textContent = "(alt: " + matched.join(", ") + ")";
+                            nameCell.appendChild(indicator);
+                        }
+                    }
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        });
+    }
+
+    // Server-side filter toggles
+    function getFilterParams() {
+        const params = new URLSearchParams(window.location.search);
+        params.delete("page"); // Reset to page 1 when filters change
+        return params;
+    }
+
+    function applyFilters(params) {
+        window.location.search = params.toString();
+    }
+
+    // Toggle filter buttons
+    document.querySelectorAll(".filter-toggle").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            const type = this.dataset.filterType;
+            const value = this.dataset.filterValue;
+            const params = getFilterParams();
+
+            const current = params.getAll(type);
+            const idx = current.indexOf(value);
+
+            params.delete(type);
+            if (idx === -1) {
+                // Add this value
+                current.push(value);
+            } else {
+                // Remove this value
+                current.splice(idx, 1);
+            }
+            current.forEach(function(v) { params.append(type, v); });
+
+            applyFilters(params);
+        });
+    });
+
+    // Title filter with Enter key
+    const titleInput = document.getElementById("titleFilter");
+    if (titleInput) {
+        titleInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                const params = getFilterParams();
+                const val = this.value.trim();
+                params.delete("title");
+                if (val) {
+                    params.set("title", val);
+                }
+                applyFilters(params);
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
