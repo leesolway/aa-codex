@@ -144,6 +144,85 @@
             {% endif %}
         </div>
     </div>
+    {% if action_needed %}
+    <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">{% trans "Incomplete Checklists" %}</h5>
+            <span class="badge bg-secondary">{% if has_active_filters %}{{ filtered_action_needed_count }} {% trans "of" %} {{ action_needed_count }}{% else %}{{ action_needed_count }}{% endif %}</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>{% trans "Character" %}</th>
+                            <th>{% trans "Rank" %}</th>
+                            <th>{% trans "Service" %}</th>
+                            <th>{% trans "Checklist" %}</th>
+                            <th>{% trans "Tags" %}</th>
+                            <th class="text-end">{% trans "Actions" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member in action_needed %}
+                        <tr>
+                            <td>
+                                <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                                     alt="{{ member.main.character_name }}"
+                                     class="rounded" width="32" height="32" loading="lazy">
+                            </td>
+                            <td>
+                                <a href="{% url 'codex:member_detail' member.user.pk %}" class="text-decoration-none">
+                                    <strong>{{ member.main.character_name }}</strong>
+                                </a>
+                            </td>
+                            <td>
+                                {% if member.rank %}
+                                <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.service_length %}
+                                {{ member.service_length }}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.checklist_items %}
+                                {% with total=member.checklist_items|length %}
+                                {% completed_count member.checklist_items as done %}
+                                <span class="{% if done == total %}text-success{% else %}text-warning{% endif %}">
+                                    {{ done }}/{{ total }}
+                                </span>
+                                {% endwith %}
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% for tag in member.tags %}
+                                <span class="badge bg-{{ tag.color }}">{{ tag.name }}</span>
+                                {% endfor %}
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-info" type="button"
+                                        data-bs-toggle="modal" data-bs-target="#detailModal-{{ member.user.pk }}"
+                                        title="{% trans 'Details' %}">
+                                    <i class="fa-solid fa-list-check"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
     {% endif %}
 </div>
 
@@ -228,6 +307,14 @@
                 {% endif %}
             </div>
             <div class="modal-footer">
+                {% if member.next_rank and not member.incomplete_checklist %}
+                <form method="post" action="{% url 'codex:promote_member' member.user.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success">
+                        <i class="fa-solid fa-arrow-up"></i> {% trans "Promote to" %} {{ member.next_rank.display_label }}
+                    </button>
+                </form>
+                {% endif %}
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{% trans "Close" %}</button>
             </div>
         </div>
@@ -266,6 +353,66 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% for member in action_needed %}
+<!-- Detail Modal (action_needed) -->
+<div class="modal fade" id="detailModal-{{ member.user.pk }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="d-flex align-items-center gap-2">
+                    <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                         alt="{{ member.main.character_name }}"
+                         class="rounded" width="32" height="32">
+                    <h5 class="modal-title">{{ member.main.character_name }}</h5>
+                    {% if member.rank %}
+                    <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                    {% endif %}
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                {% if member.checklist_items %}
+                <h6>{% trans "Checklist" %}</h6>
+                <div class="list-group mb-3">
+                    {% for ci in member.checklist_items %}
+                    <div class="list-group-item d-flex justify-content-between align-items-center"
+                         id="checklist-{{ member.user.pk }}-{{ ci.item.pk }}">
+                        <div>
+                            <button type="button"
+                                    class="btn btn-sm {% if ci.completion %}btn-success{% else %}btn-outline-secondary{% endif %} me-2 checklist-toggle"
+                                    data-url="{% url 'codex:toggle_checklist' member.user.pk ci.item.pk %}">
+                                <i class="fa-solid {% if ci.completion %}fa-check-square{% else %}fa-square{% endif %}"></i>
+                            </button>
+                            {{ ci.item.name }}
+                        </div>
+                        <small class="text-muted checklist-meta">
+                            {% if ci.completion %}
+                            {% blocktrans with who=ci.completion.completed_by|main_character_name when=ci.completion.completed_at|date:"Y-m-d" %}
+                            Completed by {{ who }} on {{ when }}
+                            {% endblocktrans %}
+                            {% endif %}
+                        </small>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            <div class="modal-footer">
+                {% if member.next_rank and not member.incomplete_checklist %}
+                <form method="post" action="{% url 'codex:promote_member' member.user.pk %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-success">
+                        <i class="fa-solid fa-arrow-up"></i> {% trans "Promote to" %} {{ member.next_rank.display_label }}
+                    </button>
+                </form>
+                {% endif %}
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">{% trans "Close" %}</button>
+            </div>
         </div>
     </div>
 </div>

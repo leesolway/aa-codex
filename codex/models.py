@@ -104,6 +104,10 @@ class Rank(models.Model):
         blank=True,
         help_text="Review permission tier. Leave blank if this rank should not be reviewed.",
     )
+    default = models.BooleanField(
+        default=False,
+        help_text="Assign this rank to new members when they join the state.",
+    )
 
     class Meta:
         ordering = ["priority"]
@@ -171,6 +175,26 @@ class ReviewAcknowledgement(models.Model):
         return f"Review ack for {self.user} at {self.rank.name}"
 
 
+class MemberRank(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="codex_rank",
+    )
+    rank = models.ForeignKey(Rank, on_delete=models.CASCADE)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="codex_rank_assignments",
+    )
+    assigned_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user} - {self.rank.name}"
+
+
 class MemberAuditLog(models.Model):
     ACTION_CHOICES = [
         ("TAG_ADDED", "Tag Added"),
@@ -179,6 +203,7 @@ class MemberAuditLog(models.Model):
         ("CHECKLIST_UNCOMPLETED", "Checklist Uncompleted"),
         ("REVIEW_ACKNOWLEDGED", "Review Acknowledged"),
         ("NOTE_ADDED", "Note Added"),
+        ("RANK_CHANGED", "Rank Changed"),
     ]
 
     user = models.ForeignKey(

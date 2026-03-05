@@ -10,3 +10,4 @@ class CodexConfig(AppConfig):
             from . import auth_hooks  # noqa: F401
         except Exception:
             pass
+        from . import signals  # noqa: F401

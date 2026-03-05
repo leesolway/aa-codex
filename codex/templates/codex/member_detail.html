@@ -77,6 +77,18 @@
                         <span class="text-muted">{% trans "No rank" %}</span>
                         {% endif %}
                     </div>
+                    {% if can_set_rank %}
+                    <form method="post" action="{% url 'codex:set_rank' member.user.pk %}" class="mt-2 d-inline-flex align-items-center gap-1">
+                        {% csrf_token %}
+                        <select name="rank_id" class="form-select form-select-sm" style="width: auto;">
+                            <option value="0">{% trans "No rank" %}</option>
+                            {% for r in all_ranks %}
+                            <option value="{{ r.pk }}" {% if member.rank and member.rank.pk == r.pk %}selected{% endif %}>{{ r.display_label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">{% trans "Set" %}</button>
+                    </form>
+                    {% endif %}
                     {% if member.service_length %}
                     <p class="mt-2 mb-0">
                         <i class="fa-solid fa-calendar-days text-muted"></i>

@@ -1,7 +1,7 @@
 from django.contrib import admin
 from solo.admin import SingletonModelAdmin
 
-from .models import ChecklistItem, CodexConfiguration, MemberAuditLog, MemberNote, Rank, Tag, TagGroup
+from .models import ChecklistItem, CodexConfiguration, MemberAuditLog, MemberNote, MemberRank, Rank, Tag, TagGroup
 
 admin.site.register(CodexConfiguration, SingletonModelAdmin)
 
@@ -13,7 +13,7 @@ class ChecklistItemInline(admin.TabularInline):
 
 @admin.register(Rank)
 class RankAdmin(admin.ModelAdmin):
-    list_display = ("name", "display_label", "eve_title", "priority", "review_threshold_days", "review_tier")
+    list_display = ("name", "display_label", "eve_title", "priority", "review_threshold_days", "review_tier", "default")
     inlines = [ChecklistItemInline]
 
 
@@ -26,6 +26,13 @@ class TagInline(admin.TabularInline):
 class TagGroupAdmin(admin.ModelAdmin):
     list_display = ("name", "order")
     inlines = [TagInline]
+
+
+@admin.register(MemberRank)
+class MemberRankAdmin(admin.ModelAdmin):
+    list_display = ("user", "rank", "assigned_by", "assigned_at")
+    list_filter = ("rank",)
+    readonly_fields = ("user", "rank", "assigned_by", "assigned_at")
 
 
 @admin.register(MemberAuditLog)

@@ -16,6 +16,7 @@ from .models import (
     MemberAuditLog,
     MemberChecklistCompletion,
     MemberNote,
+    MemberRank,
     MemberTag,
     Rank,
     ReviewAcknowledgement,
@@ -154,10 +155,17 @@ def _days_overdue(rank, service_days, user, acknowledgements_by_user):
     return max(overdue, 0)
 
 
-def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user=None):
-    """Build the member list with rank detection and review flags."""
+def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user=None, ranks_by_user=None):
+    """Build the member list with stored rank as source of truth.
+
+    ranks_by_user maps user PK to a MemberRank instance. The stored rank is
+    authoritative; EVE title detection is still used to flag mismatches (when
+    a character's detected rank differs from the stored Codex rank).
+    """
     if tags_by_user is None:
         tags_by_user = {}
+    if ranks_by_user is None:
+        ranks_by_user = {}
     members = []
     for user in users:
         main = user.profile.main_character
@@ -178,7 +186,24 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
             titles = ""
 
         service_length, service_date, service_days = _compute_service(main)
-        rank, rank_mismatch, all_ranks = detect_member_rank(main, alts, ranks_by_title)
+
+        # Use stored rank as the authoritative rank
+        member_rank_obj = ranks_by_user.get(user.pk)
+        stored_rank = member_rank_obj.rank if member_rank_obj else None
+
+        # Detect EVE-title rank to check for mismatches against stored rank
+        detected_rank, _, all_ranks = detect_member_rank(main, alts, ranks_by_title)
+
+        # Mismatch: any character's detected EVE-title rank differs from stored Codex rank
+        if stored_rank and detected_rank:
+            rank_mismatch = any(r != stored_rank for r in all_ranks)
+        elif stored_rank and not detected_rank:
+            # Stored rank but no EVE titles found — flag mismatch
+            rank_mismatch = True
+        else:
+            rank_mismatch = False
+
+        rank = stored_rank
         review_due = _is_review_due(rank, service_days, user, acknowledgements_by_user)
         days_overdue = _days_overdue(rank, service_days, user, acknowledgements_by_user)
 
@@ -203,6 +228,39 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
 
     members.sort(key=lambda m: m["main"].character_name)
     return members
+
+
+def _assign_default_ranks(user_ids):
+    """Assign the default rank to users who don't already have a MemberRank."""
+    default_rank = Rank.objects.filter(default=True).first()
+    if not default_rank:
+        return
+
+    existing_user_ids = set(
+        MemberRank.objects.filter(user_id__in=user_ids).values_list("user_id", flat=True)
+    )
+    missing = [uid for uid in user_ids if uid not in existing_user_ids]
+    if not missing:
+        return
+
+    to_create = [MemberRank(user_id=uid, rank=default_rank, assigned_by=None) for uid in missing]
+    audit_entries = [
+        MemberAuditLog(
+            user_id=uid,
+            actor=None,
+            action_type="RANK_CHANGED",
+            details=f"Default rank assigned: {default_rank.name}",
+        )
+        for uid in missing
+    ]
+    MemberRank.objects.bulk_create(to_create, ignore_conflicts=True)
+    MemberAuditLog.objects.bulk_create(audit_entries)
+
+
+def _bulk_fetch_ranks(user_ids):
+    """Return a dict mapping user PK to MemberRank instance."""
+    member_ranks = MemberRank.objects.filter(user_id__in=user_ids).select_related("rank")
+    return {mr.user_id: mr for mr in member_ranks}
 
 
 def _assign_default_tags(user_ids):
@@ -370,8 +428,12 @@ def index(request):
     for ack in all_acks:
         acks_by_user.setdefault(ack.user_id, []).append(ack)
 
-    # Assign default tags to any members missing them
+    # Assign default tags and ranks to any members missing them
     _assign_default_tags(user_ids)
+    _assign_default_ranks(user_ids)
+
+    # Bulk-fetch ranks
+    ranks_by_user = _bulk_fetch_ranks(user_ids)
 
     # Bulk-fetch tags
     all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
@@ -381,7 +443,7 @@ def index(request):
     for mt in all_member_tags:
         tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
 
-    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user)
+    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
 
     # Collect filter options
     all_tags = Tag.objects.select_related("group").order_by("group__order", "order")
@@ -494,6 +556,12 @@ def review(request):
     for ack in all_acks:
         acks_by_user.setdefault(ack.user_id, []).append(ack)
 
+    # Assign default ranks to any members missing them
+    _assign_default_ranks(user_ids)
+
+    # Bulk-fetch ranks
+    ranks_by_user = _bulk_fetch_ranks(user_ids)
+
     # Bulk-fetch tags
     all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
         "tag__group"
@@ -502,7 +570,14 @@ def review(request):
     for mt in all_member_tags:
         tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
 
-    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user)
+    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
+
+    # Precompute next rank for each rank (next higher priority)
+    all_ranks_ordered = list(Rank.objects.order_by("priority"))
+    next_rank_map = {}
+    for i, r in enumerate(all_ranks_ordered):
+        if i + 1 < len(all_ranks_ordered):
+            next_rank_map[r.pk] = all_ranks_ordered[i + 1]
 
     # Determine which checklist items each member's rank requires
     all_checklist_items = ChecklistItem.objects.select_related("rank").all()
@@ -520,6 +595,7 @@ def review(request):
 
     # Filter to flagged members and attach checklist info
     flagged = []
+    action_needed = []
     for m in members:
         rank = m["rank"]
 
@@ -539,16 +615,20 @@ def review(request):
 
         m["checklist_items"] = items_with_status
         m["incomplete_checklist"] = incomplete_checklist
+        m["next_rank"] = next_rank_map.get(rank.pk)
 
         # Acknowledgement history for this user+rank
         m["acknowledgements"] = [
             a for a in acks_by_user.get(m["user"].pk, []) if a.rank_id == rank.pk
         ]
 
-        if m["review_due"] or m["rank_mismatch"] or incomplete_checklist:
+        if m["review_due"] or m["rank_mismatch"]:
             flagged.append(m)
+        elif incomplete_checklist:
+            action_needed.append(m)
 
     flagged.sort(key=lambda m: m["days_overdue"], reverse=True)
+    action_needed.sort(key=lambda m: m["days_overdue"], reverse=True)
 
     # Collect ranks the user is permitted to see for filter options
     available_ranks = Rank.objects.filter(review_tier__in=user_tiers).order_by("priority")
@@ -556,19 +636,24 @@ def review(request):
     # Apply rank filter
     active_rank_ids = [int(x) for x in request.GET.getlist("rank") if x.isdigit()]
     total_flagged = len(flagged)
+    total_action_needed = len(action_needed)
 
     if active_rank_ids:
         rank_id_set = set(active_rank_ids)
         flagged = [m for m in flagged if m["rank"] and m["rank"].pk in rank_id_set]
+        action_needed = [m for m in action_needed if m["rank"] and m["rank"].pk in rank_id_set]
 
     return render(
         request,
         "codex/review.html",
         {
             "members": flagged,
+            "action_needed": action_needed,
             "state": config.aa_state,
             "member_count": total_flagged,
+            "action_needed_count": total_action_needed,
             "filtered_count": len(flagged),
+            "filtered_action_needed_count": len(action_needed),
             "available_ranks": available_ranks,
             "active_rank_ids": active_rank_ids,
             "has_active_filters": bool(active_rank_ids),
@@ -643,34 +728,80 @@ def acknowledge_review(request, user_id):
     if not note:
         return redirect("codex:review")
 
-    # Detect the member's current rank
-    config = CodexConfiguration.get_solo()
-    ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
-    main = member.profile.main_character
-    if main:
-        alts = [
-            o.character
-            for o in member.character_ownerships.select_related("character").all()
-            if o.character and o.character.character_id != main.character_id
-        ]
-        rank, _, _ = detect_member_rank(main, alts, ranks_by_title)
-        if rank and not _can_review_member(request.user, rank):
-            return redirect("codex:review")
-        if rank:
-            ReviewAcknowledgement.objects.create(
+    # Use stored rank from MemberRank
+    member_rank = MemberRank.objects.filter(user=member).select_related("rank").first()
+    rank = member_rank.rank if member_rank else None
+
+    if rank and not _can_review_member(request.user, rank):
+        return redirect("codex:review")
+    if rank:
+        ReviewAcknowledgement.objects.create(
+            user=member,
+            rank=rank,
+            acknowledged_by=request.user,
+            note=note,
+        )
+        MemberAuditLog.objects.create(
+            user=member,
+            actor=request.user,
+            action_type="REVIEW_ACKNOWLEDGED",
+            details=rank.name,
+        )
+
+    return redirect("codex:review")
+
+
+@login_required
+def set_rank(request, user_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    if not _get_user_review_tiers(request.user):
+        return redirect("codex:index")
+
+    member = get_object_or_404(User, pk=user_id)
+    rank_id = request.POST.get("rank_id", "").strip()
+
+    existing = MemberRank.objects.filter(user=member).select_related("rank").first()
+    old_rank_name = existing.rank.name if existing else None
+
+    if not rank_id or rank_id == "0":
+        # Remove rank
+        if existing:
+            existing.delete()
+            MemberAuditLog.objects.create(
                 user=member,
-                rank=rank,
-                acknowledged_by=request.user,
-                note=note,
+                actor=request.user,
+                action_type="RANK_CHANGED",
+                details=f"Rank removed (was {old_rank_name})",
+            )
+    else:
+        new_rank = get_object_or_404(Rank, pk=int(rank_id))
+        if existing:
+            if existing.rank_id != new_rank.pk:
+                existing.rank = new_rank
+                existing.assigned_by = request.user
+                existing.save()
+                MemberAuditLog.objects.create(
+                    user=member,
+                    actor=request.user,
+                    action_type="RANK_CHANGED",
+                    details=f"Rank changed from {old_rank_name} to {new_rank.name}",
+                )
+        else:
+            MemberRank.objects.create(
+                user=member,
+                rank=new_rank,
+                assigned_by=request.user,
             )
             MemberAuditLog.objects.create(
                 user=member,
                 actor=request.user,
-                action_type="REVIEW_ACKNOWLEDGED",
-                details=rank.name,
+                action_type="RANK_CHANGED",
+                details=f"Rank set to {new_rank.name}",
             )
 
-    return redirect("codex:review")
+    return redirect("codex:member_detail", user_id=user_id)
 
 
 @login_required
@@ -812,7 +943,9 @@ def member_detail(request, user_id):
         ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
         acks_by_user = {target_user.pk: list(acks)}
         _assign_default_tags([target_user.pk])
-        members = _build_members([target_user], ranks_by_title, acks_by_user, tags_by_user)
+        _assign_default_ranks([target_user.pk])
+        ranks_by_user = _bulk_fetch_ranks([target_user.pk])
+        members = _build_members([target_user], ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
 
     if not members:
         return redirect("codex:index")
@@ -838,6 +971,8 @@ def member_detail(request, user_id):
             request.user.pk == target_user.pk
             or request.user.has_perm("codex.manage_tags")
         ),
+        "all_ranks": Rank.objects.order_by("priority"),
+        "can_set_rank": has_any_review_perm and not is_former,
     }
     return render(request, "codex/member_detail.html", context)
 
@@ -865,3 +1000,48 @@ def add_note(request, user_id):
         )
 
     return redirect("codex:member_detail", user_id=user_id)
+
+
+@login_required
+def promote_member(request, user_id):
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    member = get_object_or_404(User, pk=user_id)
+    member_rank = MemberRank.objects.filter(user=member).select_related("rank").first()
+    if not member_rank:
+        return redirect("codex:review")
+
+    current_rank = member_rank.rank
+
+    # Check reviewer has permission for the current rank's review tier
+    if not _can_review_member(request.user, current_rank):
+        return redirect("codex:review")
+
+    # Find the next rank (next higher priority)
+    next_rank = Rank.objects.filter(priority__gt=current_rank.priority).order_by("priority").first()
+    if not next_rank:
+        return redirect("codex:review")
+
+    # Check all checklist items for the current rank are completed
+    checklist_items = ChecklistItem.objects.filter(rank=current_rank)
+    completed_count = MemberChecklistCompletion.objects.filter(
+        user=member, checklist_item__in=checklist_items
+    ).count()
+    if completed_count < checklist_items.count():
+        return redirect("codex:review")
+
+    # Promote: update MemberRank
+    old_rank_name = current_rank.name
+    member_rank.rank = next_rank
+    member_rank.assigned_by = request.user
+    member_rank.save()
+
+    MemberAuditLog.objects.create(
+        user=member,
+        actor=request.user,
+        action_type="RANK_CHANGED",
+        details=f"Promoted from {old_rank_name} to {next_rank.name}",
+    )
+
+    return redirect("codex:review")
