@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import Group
 from django.core.paginator import Paginator
-from django.http import HttpResponseNotAllowed, QueryDict
+from django.http import HttpResponseNotAllowed, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -584,8 +584,12 @@ def toggle_checklist(request, user_id, item_id):
     member = get_object_or_404(User, pk=user_id)
     item = get_object_or_404(ChecklistItem, pk=item_id)
 
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
     # Check tier permission for the item's rank
     if not _can_review_member(request.user, item.rank):
+        if is_ajax:
+            return JsonResponse({"error": "forbidden"}, status=403)
         return redirect("codex:review")
 
     existing = MemberChecklistCompletion.objects.filter(
@@ -599,8 +603,9 @@ def toggle_checklist(request, user_id, item_id):
             action_type="CHECKLIST_UNCOMPLETED",
             details=item.name,
         )
+        completed = False
     else:
-        MemberChecklistCompletion.objects.create(
+        comp = MemberChecklistCompletion.objects.create(
             checklist_item=item, user=member, completed_by=request.user
         )
         MemberAuditLog.objects.create(
@@ -609,6 +614,21 @@ def toggle_checklist(request, user_id, item_id):
             action_type="CHECKLIST_COMPLETED",
             details=item.name,
         )
+        completed = True
+
+    if is_ajax:
+        actor_name = ""
+        try:
+            main = request.user.profile.main_character
+            if main:
+                actor_name = main.character_name
+        except Exception:
+            actor_name = request.user.username
+        return JsonResponse({
+            "completed": completed,
+            "completed_by": actor_name if completed else "",
+            "completed_at": timezone.now().strftime("%Y-%m-%d") if completed else "",
+        })
 
     return redirect("codex:review")
 

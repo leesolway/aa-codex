@@ -179,23 +179,23 @@
                 <h6>{% trans "Checklist" %}</h6>
                 <div class="list-group mb-3">
                     {% for ci in member.checklist_items %}
-                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div class="list-group-item d-flex justify-content-between align-items-center"
+                         id="checklist-{{ member.user.pk }}-{{ ci.item.pk }}">
                         <div>
-                            <form method="post" action="{% url 'codex:toggle_checklist' member.user.pk ci.item.pk %}" class="d-inline">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm {% if ci.completion %}btn-success{% else %}btn-outline-secondary{% endif %} me-2">
-                                    <i class="fa-solid {% if ci.completion %}fa-check-square{% else %}fa-square{% endif %}"></i>
-                                </button>
-                            </form>
+                            <button type="button"
+                                    class="btn btn-sm {% if ci.completion %}btn-success{% else %}btn-outline-secondary{% endif %} me-2 checklist-toggle"
+                                    data-url="{% url 'codex:toggle_checklist' member.user.pk ci.item.pk %}">
+                                <i class="fa-solid {% if ci.completion %}fa-check-square{% else %}fa-square{% endif %}"></i>
+                            </button>
                             {{ ci.item.name }}
                         </div>
-                        {% if ci.completion %}
-                        <small class="text-muted">
+                        <small class="text-muted checklist-meta">
+                            {% if ci.completion %}
                             {% blocktrans with who=ci.completion.completed_by|main_character_name when=ci.completion.completed_at|date:"Y-m-d" %}
                             Completed by {{ who }} on {{ when }}
                             {% endblocktrans %}
+                            {% endif %}
                         </small>
-                        {% endif %}
                     </div>
                     {% endfor %}
                 </div>
@@ -275,6 +275,7 @@
 {% block extra_javascript %}
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    // Rank filter toggles
     document.querySelectorAll(".rank-filter-toggle").forEach(function(btn) {
         btn.addEventListener("click", function() {
             const value = this.dataset.rankId;
@@ -291,6 +292,57 @@ document.addEventListener("DOMContentLoaded", function() {
             current.forEach(function(v) { params.append("rank", v); });
 
             window.location.search = params.toString();
+        });
+    });
+
+    // AJAX checklist toggles
+    const csrfToken = document.querySelector("[name=csrfmiddlewaretoken]");
+    const csrfValue = csrfToken ? csrfToken.value : "{{ csrf_token }}";
+
+    document.querySelectorAll(".checklist-toggle").forEach(function(btn) {
+        btn.addEventListener("click", function() {
+            const button = this;
+            const url = button.dataset.url;
+            const icon = button.querySelector("i");
+            const meta = button.closest(".list-group-item").querySelector(".checklist-meta");
+
+            button.disabled = true;
+
+            // Optimistic UI update
+            const wasCompleted = button.classList.contains("btn-success");
+            button.classList.toggle("btn-success", !wasCompleted);
+            button.classList.toggle("btn-outline-secondary", wasCompleted);
+            icon.classList.toggle("fa-check-square", !wasCompleted);
+            icon.classList.toggle("fa-square", wasCompleted);
+
+            fetch(url, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": csrfValue,
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            })
+            .then(function(response) {
+                if (!response.ok) throw new Error("Request failed");
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.completed) {
+                    meta.textContent = "Completed by " + data.completed_by + " on " + data.completed_at;
+                } else {
+                    meta.textContent = "";
+                }
+            })
+            .catch(function() {
+                // Revert on error
+                button.classList.toggle("btn-success", wasCompleted);
+                button.classList.toggle("btn-outline-secondary", !wasCompleted);
+                icon.classList.toggle("fa-check-square", wasCompleted);
+                icon.classList.toggle("fa-square", !wasCompleted);
+            })
+            .finally(function() {
+                button.disabled = false;
+            });
         });
     });
 });
