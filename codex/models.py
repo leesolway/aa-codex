@@ -94,11 +94,15 @@ class Rank(models.Model):
         help_text="Lower = lower rank. Used for ordering.",
     )
     review_threshold_days = models.PositiveIntegerField(
-        help_text="Days of service before a review is due.",
+        null=True,
+        blank=True,
+        help_text="Days of service before a review is due. Leave blank if this rank should not be reviewed.",
     )
     review_tier = models.PositiveIntegerField(
         choices=REVIEW_TIER_CHOICES,
-        default=1,
+        null=True,
+        blank=True,
+        help_text="Review permission tier. Leave blank if this rank should not be reviewed.",
     )
 
     class Meta:

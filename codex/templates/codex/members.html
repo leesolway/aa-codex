@@ -18,7 +18,7 @@
         </div>
         <div class="card-body p-0">
             <div class="p-3 pb-0">
-                <input type="text" id="memberSearch" class="form-control" placeholder="{% trans 'Search members and alts on this page...' %}">
+                <input type="text" id="memberSearch" class="form-control" placeholder="{% trans 'Search members and alts...' %}" value="{{ search_query }}">
             </div>
 
             <!-- Filter Toggle -->
@@ -188,10 +188,17 @@
                                 {% endif %}
                             </td>
                             <td class="text-center">
-                                <a href="https://zkillboard.com/character/{{ member.main.character_id }}/"
+                                {% zkillboard_url member.main.character_id as zkill_href %}
+                                <a href="{{ zkill_href }}"
                                    target="_blank" rel="noopener noreferrer"
                                    title="zKillboard" onclick="event.stopPropagation();">
                                     <i class="fa-solid fa-skull-crossbones"></i>
+                                </a>
+                                {% evewho_url member.main.character_id as evewho_href %}
+                                <a href="{{ evewho_href }}"
+                                   target="_blank" rel="noopener noreferrer"
+                                   title="Evewho" onclick="event.stopPropagation();" class="ms-2">
+                                    <i class="fa-solid fa-address-card"></i>
                                 </a>
                             </td>
                         </tr>
@@ -266,50 +273,6 @@
 {% block extra_javascript %}
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    // Client-side search within current page
-    const searchInput = document.getElementById("memberSearch");
-    if (searchInput) {
-        searchInput.addEventListener("input", function() {
-            const term = this.value.toLowerCase();
-            const rows = document.querySelectorAll("#memberTableBody .member-row");
-            rows.forEach(function(row) {
-                const nameCell = row.querySelector(".member-name");
-                const name = nameCell.textContent.toLowerCase();
-                const altNamesRaw = row.getAttribute("data-alt-names") || "";
-                const altNames = altNamesRaw.toLowerCase();
-
-                const existing = nameCell.querySelector(".alt-match-indicator");
-                if (existing) existing.remove();
-
-                if (!term) {
-                    row.style.display = "";
-                    return;
-                }
-
-                const nameMatch = name.includes(term);
-                const altMatch = altNames.includes(term);
-
-                if (nameMatch || altMatch) {
-                    row.style.display = "";
-                    if (!nameMatch && altMatch) {
-                        const alts = altNamesRaw.split(", ");
-                        const matched = alts.filter(function(a) {
-                            return a.toLowerCase().includes(term);
-                        });
-                        if (matched.length > 0) {
-                            const indicator = document.createElement("div");
-                            indicator.className = "alt-match-indicator text-muted small";
-                            indicator.textContent = "(alt: " + matched.join(", ") + ")";
-                            nameCell.appendChild(indicator);
-                        }
-                    }
-                } else {
-                    row.style.display = "none";
-                }
-            });
-        });
-    }
-
     // Server-side filter toggles
     function getFilterParams() {
         const params = new URLSearchParams(window.location.search);
@@ -356,6 +319,23 @@ document.addEventListener("DOMContentLoaded", function() {
                 params.delete("title");
                 if (val) {
                     params.set("title", val);
+                }
+                applyFilters(params);
+            }
+        });
+    }
+
+    // Server-side member search with Enter key
+    const searchInput = document.getElementById("memberSearch");
+    if (searchInput) {
+        searchInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                const params = getFilterParams();
+                const val = this.value.trim();
+                params.delete("search");
+                if (val) {
+                    params.set("search", val);
                 }
                 applyFilters(params);
             }

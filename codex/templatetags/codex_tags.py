@@ -29,6 +29,18 @@ def completed_count(checklist_items):
     return sum(1 for ci in checklist_items if ci["completion"])
 
 
+@register.simple_tag
+def zkillboard_url(character_id):
+    """Return a zKillboard URL for a character."""
+    return f"https://zkillboard.com/character/{character_id}/"
+
+
+@register.simple_tag
+def evewho_url(character_id):
+    """Return an Evewho URL for a character."""
+    return f"https://evewho.com/character/{character_id}"
+
+
 @register.filter
 def main_character_name(user):
     """Return the user's main character name, or username as fallback."""

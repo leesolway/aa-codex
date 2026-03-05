@@ -78,11 +78,13 @@
                     {% endif %}
                     {% if member.main %}
                     <div class="mt-3">
-                        <a href="https://zkillboard.com/character/{{ member.main.character_id }}/"
+                        {% zkillboard_url member.main.character_id as zkill_href %}
+                        <a href="{{ zkill_href }}"
                            target="_blank" rel="noopener noreferrer" title="zKillboard" class="me-3">
                             <i class="fa-solid fa-skull-crossbones"></i> zKillboard
                         </a>
-                        <a href="https://evewho.com/character/{{ member.main.character_id }}"
+                        {% evewho_url member.main.character_id as evewho_href %}
+                        <a href="{{ evewho_href }}"
                            target="_blank" rel="noopener noreferrer" title="Eve-Who" class="me-3">
                             <i class="fa-solid fa-address-card"></i> Eve-Who
                         </a>
@@ -142,11 +144,13 @@
                                         {% endif %}
                                     </td>
                                     <td class="text-center">
-                                        <a href="https://zkillboard.com/character/{{ alt.character_id }}/"
+                                        {% zkillboard_url alt.character_id as alt_zkill_href %}
+                                        <a href="{{ alt_zkill_href }}"
                                            target="_blank" rel="noopener noreferrer" title="zKillboard">
                                             <i class="fa-solid fa-skull-crossbones"></i>
                                         </a>
-                                        <a href="https://evewho.com/character/{{ alt.character_id }}"
+                                        {% evewho_url alt.character_id as alt_evewho_href %}
+                                        <a href="{{ alt_evewho_href }}"
                                            target="_blank" rel="noopener noreferrer" title="Eve-Who" class="ms-2">
                                             <i class="fa-solid fa-address-card"></i>
                                         </a>

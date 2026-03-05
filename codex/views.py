@@ -100,7 +100,7 @@ def _compute_service(main):
 
 def _is_review_due(rank, service_days, user, acknowledgements_by_user):
     """Check if a member's review is due based on service time and acknowledgements."""
-    if not rank or service_days < rank.review_threshold_days:
+    if not rank or rank.review_threshold_days is None or service_days < rank.review_threshold_days:
         return False
 
     acks = acknowledgements_by_user.get(user.pk, [])
@@ -121,7 +121,7 @@ def _is_review_due(rank, service_days, user, acknowledgements_by_user):
 
 def _days_overdue(rank, service_days, user, acknowledgements_by_user):
     """Return how many days overdue a review is, or 0 if not due."""
-    if not rank or service_days < rank.review_threshold_days:
+    if not rank or rank.review_threshold_days is None or service_days < rank.review_threshold_days:
         return 0
 
     acks = acknowledgements_by_user.get(user.pk, [])
@@ -379,6 +379,7 @@ def index(request):
     active_rank_ids = [int(x) for x in request.GET.getlist("rank") if x.isdigit()]
     active_group_ids = [int(x) for x in request.GET.getlist("group") if x.isdigit()]
     title_filter = request.GET.get("title", "").strip()
+    search_query = request.GET.get("search", "").strip()
 
     total_count = len(members)
 
@@ -402,6 +403,14 @@ def index(request):
             if group_id_set & {g.pk for g in m["user"].groups.all()}
         ]
 
+    if search_query:
+        search_lower = search_query.lower()
+        members = [
+            m for m in members
+            if search_lower in m["main"].character_name.lower()
+            or any(search_lower in alt.character_name.lower() for alt in m["alts"])
+        ]
+
     filtered_count = len(members)
 
     # Paginate
@@ -409,7 +418,7 @@ def index(request):
     page_num = request.GET.get("page", 1)
     page_obj = paginator.get_page(page_num)
 
-    has_active_filters = bool(active_tag_ids or active_rank_ids or active_group_ids or title_filter)
+    has_active_filters = bool(active_tag_ids or active_rank_ids or active_group_ids or title_filter or search_query)
 
     # Build query string for pagination links (excludes 'page')
     filter_qd = QueryDict(mutable=True)
@@ -421,6 +430,8 @@ def index(request):
         filter_qd.appendlist("group", str(gid))
     if title_filter:
         filter_qd["title"] = title_filter
+    if search_query:
+        filter_qd["search"] = search_query
     filter_query = filter_qd.urlencode()
 
     return render(
@@ -441,6 +452,7 @@ def index(request):
             "title_filter": title_filter,
             "has_active_filters": has_active_filters,
             "filter_query": filter_query,
+            "search_query": search_query,
         },
     )
 

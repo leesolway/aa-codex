@@ -73,10 +73,17 @@
                             </td>
                             <td class="text-center">
                                 {% if member.character_id %}
-                                <a href="https://zkillboard.com/character/{{ member.character_id }}/"
+                                {% zkillboard_url member.character_id as zkill_href %}
+                                <a href="{{ zkill_href }}"
                                    target="_blank" rel="noopener noreferrer"
                                    title="zKillboard" onclick="event.stopPropagation();">
                                     <i class="fa-solid fa-skull-crossbones"></i>
+                                </a>
+                                {% evewho_url member.character_id as evewho_href %}
+                                <a href="{{ evewho_href }}"
+                                   target="_blank" rel="noopener noreferrer"
+                                   title="Evewho" onclick="event.stopPropagation();" class="ms-2">
+                                    <i class="fa-solid fa-address-card"></i>
                                 </a>
                                 {% else %}
                                 <span class="text-muted">-</span>
