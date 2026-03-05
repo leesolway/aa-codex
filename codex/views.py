@@ -49,24 +49,38 @@ def detect_member_rank(main, alts, ranks_by_title):
     """Detect a member's rank from EVE titles across all characters.
 
     Returns (rank, rank_mismatch, all_ranks).
+
+    Rank mismatch is only flagged when different characters resolve to
+    different highest ranks (e.g. main is R1 but an alt is R2).  A single
+    character holding multiple rank-related titles is not a mismatch.
     """
-    found_ranks = set()
     characters = [main] + list(alts)
+    per_char_ranks = []
+    all_found_ranks = set()
+
     for char in characters:
         try:
             titles = char.characteraudit.characterroles.titles.all()
+            char_ranks = set()
             for t in titles:
                 if t.title in ranks_by_title:
-                    found_ranks.add(ranks_by_title[t.title])
+                    char_ranks.add(ranks_by_title[t.title])
+            if char_ranks:
+                highest = max(char_ranks, key=lambda r: r.priority)
+                per_char_ranks.append(highest)
+                all_found_ranks.update(char_ranks)
         except Exception:
             continue
 
-    if not found_ranks:
+    if not per_char_ranks:
         return None, False, set()
 
-    rank_mismatch = len(found_ranks) > 1
-    highest = max(found_ranks, key=lambda r: r.priority)
-    return highest, rank_mismatch, found_ranks
+    # Mismatch when characters disagree on their highest rank
+    distinct_char_ranks = set(per_char_ranks)
+    rank_mismatch = len(distinct_char_ranks) > 1
+
+    highest = max(per_char_ranks, key=lambda r: r.priority)
+    return highest, rank_mismatch, distinct_char_ranks
 
 
 def _compute_service(main):

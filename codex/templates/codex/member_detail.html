@@ -61,7 +61,14 @@
                         {% if member.rank %}
                         <span class="badge bg-info">{{ member.rank.display_label }}</span>
                         {% if member.rank_mismatch %}
-                        <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch across characters' %}"></i>
+                        <div class="mt-1">
+                            <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+                            <small class="text-warning">{% trans "Rank mismatch:" %}
+                                {% for r in member.all_ranks %}
+                                <span class="badge bg-warning text-dark">{{ r.display_label }}</span>
+                                {% endfor %}
+                            </small>
+                        </div>
                         {% endif %}
                         {% if member.review_due %}
                         <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>

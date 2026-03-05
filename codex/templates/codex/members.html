@@ -150,7 +150,7 @@
                                 {% if member.rank %}
                                 <span class="badge bg-info">{{ member.rank.display_label }}</span>
                                 {% if member.rank_mismatch %}
-                                <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch across characters' %}"></i>
+                                <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch:' %} {% for r in member.all_ranks %}{{ r.display_label }}{% if not forloop.last %}, {% endif %}{% endfor %}"></i>
                                 {% endif %}
                                 {% if member.review_due %}
                                 <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>
