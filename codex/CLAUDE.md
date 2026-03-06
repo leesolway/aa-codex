@@ -74,8 +74,9 @@ All templates extend `allianceauth/base-bs5.html` (Bootstrap 5). Located in `tem
 
 - `detect_member_rank()` - Matches EVE character titles to Rank objects, detects mismatches across alts
 - `_compute_service()` - Calculates corp service time from CorporationHistory
-- `_is_review_due()` - Checks if review threshold has been crossed since last acknowledgement
+- `_review_status()` - Returns (review_due, days_overdue) tuple for a member
 - `_build_members()` - Enriches user queryset with rank, service, review status, and tags
+- `_bulk_fetch_acks()` / `_bulk_fetch_ranks()` / `_bulk_fetch_tags()` - Batch-load related data into dicts keyed by user PK
 - `_assign_default_tags()` - Bulk-assigns default tags to new members with audit logging
 
 ## Development Notes

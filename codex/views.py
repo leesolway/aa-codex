@@ -113,31 +113,14 @@ def _compute_service(main):
         return "", None, 0
 
 
-def _is_review_due(rank, service_days, user, acknowledgements_by_user):
-    """Check if a member's review is due based on service time and acknowledgements."""
+def _review_status(rank, service_days, user, acknowledgements_by_user):
+    """Return (review_due, days_overdue) for a member.
+
+    review_due is True when a review is needed; days_overdue is how many
+    days past the threshold (0 when not overdue).
+    """
     if not rank or rank.review_threshold_days is None or service_days < rank.review_threshold_days:
-        return False
-
-    acks = acknowledgements_by_user.get(user.pk, [])
-    # Find the most recent ack for this rank
-    latest_ack = None
-    for ack in acks:
-        if ack.rank_id == rank.pk:
-            if latest_ack is None or ack.acknowledged_at > latest_ack.acknowledged_at:
-                latest_ack = ack
-    if latest_ack is None:
-        return True
-
-    # Review is due again if the ack is older than one threshold period
-    return timezone.now() - latest_ack.acknowledged_at > timedelta(
-        days=rank.review_threshold_days
-    )
-
-
-def _days_overdue(rank, service_days, user, acknowledgements_by_user):
-    """Return how many days overdue a review is, or 0 if not due."""
-    if not rank or rank.review_threshold_days is None or service_days < rank.review_threshold_days:
-        return 0
+        return False, 0
 
     acks = acknowledgements_by_user.get(user.pk, [])
     latest_ack = None
@@ -147,12 +130,13 @@ def _days_overdue(rank, service_days, user, acknowledgements_by_user):
                 latest_ack = ack
 
     if latest_ack is None:
-        # Overdue since they crossed the threshold
-        return service_days - rank.review_threshold_days
+        return True, service_days - rank.review_threshold_days
 
     elapsed = (timezone.now() - latest_ack.acknowledged_at).days
     overdue = elapsed - rank.review_threshold_days
-    return max(overdue, 0)
+    if overdue > 0:
+        return True, overdue
+    return timezone.now() - latest_ack.acknowledged_at > timedelta(days=rank.review_threshold_days), 0
 
 
 def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user=None, ranks_by_user=None):
@@ -204,8 +188,19 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
             rank_mismatch = False
 
         rank = stored_rank
-        review_due = _is_review_due(rank, service_days, user, acknowledgements_by_user)
-        days_overdue = _days_overdue(rank, service_days, user, acknowledgements_by_user)
+        review_due, days_overdue = _review_status(rank, service_days, user, acknowledgements_by_user)
+
+        # Check if member is inactive and has EVE rank titles
+        user_tags = tags_by_user.get(user.pk, [])
+        inactive_has_roles = False
+        inactive_role_names = []
+        is_inactive = any(
+            t.name == "Inactive" and t.is_system for t in user_tags
+        )
+        if is_inactive and all_ranks:
+            rank_mismatch = False
+            inactive_has_roles = True
+            inactive_role_names = [r.display_label for r in all_ranks]
 
         members.append(
             {
@@ -222,7 +217,9 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
                 "all_ranks": all_ranks,
                 "review_due": review_due,
                 "days_overdue": days_overdue,
-                "tags": tags_by_user.get(user.pk, []),
+                "tags": user_tags,
+                "inactive_has_roles": inactive_has_roles,
+                "inactive_role_names": inactive_role_names,
             }
         )
 
@@ -261,6 +258,28 @@ def _bulk_fetch_ranks(user_ids):
     """Return a dict mapping user PK to MemberRank instance."""
     member_ranks = MemberRank.objects.filter(user_id__in=user_ids).select_related("rank")
     return {mr.user_id: mr for mr in member_ranks}
+
+
+def _bulk_fetch_acks(user_ids):
+    """Return a dict mapping user PK to list of ReviewAcknowledgement instances."""
+    all_acks = ReviewAcknowledgement.objects.filter(user_id__in=user_ids).select_related(
+        "rank", "acknowledged_by__profile__main_character"
+    )
+    acks_by_user = {}
+    for ack in all_acks:
+        acks_by_user.setdefault(ack.user_id, []).append(ack)
+    return acks_by_user
+
+
+def _bulk_fetch_tags(user_ids):
+    """Return a dict mapping user PK to list of Tag instances."""
+    all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
+        "tag__group"
+    )
+    tags_by_user = {}
+    for mt in all_member_tags:
+        tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
+    return tags_by_user
 
 
 def _assign_default_tags(user_ids):
@@ -423,10 +442,7 @@ def index(request):
 
     # Bulk-fetch acknowledgements
     user_ids = [u.pk for u in users]
-    all_acks = ReviewAcknowledgement.objects.filter(user_id__in=user_ids).select_related("rank")
-    acks_by_user = {}
-    for ack in all_acks:
-        acks_by_user.setdefault(ack.user_id, []).append(ack)
+    acks_by_user = _bulk_fetch_acks(user_ids)
 
     # Assign default tags and ranks to any members missing them
     _assign_default_tags(user_ids)
@@ -436,12 +452,7 @@ def index(request):
     ranks_by_user = _bulk_fetch_ranks(user_ids)
 
     # Bulk-fetch tags
-    all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
-        "tag__group"
-    )
-    tags_by_user = {}
-    for mt in all_member_tags:
-        tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
+    tags_by_user = _bulk_fetch_tags(user_ids)
 
     members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
 
@@ -549,12 +560,7 @@ def review(request):
 
     # Bulk-fetch acknowledgements
     user_ids = [u.pk for u in users]
-    all_acks = ReviewAcknowledgement.objects.filter(user_id__in=user_ids).select_related(
-        "rank", "acknowledged_by__profile__main_character"
-    )
-    acks_by_user = {}
-    for ack in all_acks:
-        acks_by_user.setdefault(ack.user_id, []).append(ack)
+    acks_by_user = _bulk_fetch_acks(user_ids)
 
     # Assign default ranks to any members missing them
     _assign_default_ranks(user_ids)
@@ -563,12 +569,7 @@ def review(request):
     ranks_by_user = _bulk_fetch_ranks(user_ids)
 
     # Bulk-fetch tags
-    all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
-        "tag__group"
-    )
-    tags_by_user = {}
-    for mt in all_member_tags:
-        tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
+    tags_by_user = _bulk_fetch_tags(user_ids)
 
     members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
 
@@ -756,7 +757,8 @@ def set_rank(request, user_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
 
-    if not _get_user_review_tiers(request.user):
+    user_tiers = _get_user_review_tiers(request.user)
+    if not user_tiers:
         return redirect("codex:index")
 
     member = get_object_or_404(User, pk=user_id)
@@ -766,7 +768,9 @@ def set_rank(request, user_id):
     old_rank_name = existing.rank.name if existing else None
 
     if not rank_id or rank_id == "0":
-        # Remove rank
+        # Remove rank — only allowed if current rank is within reviewer's tiers
+        if existing and existing.rank.review_tier not in user_tiers:
+            return redirect("codex:member_detail", user_id=user_id)
         if existing:
             existing.delete()
             MemberAuditLog.objects.create(
@@ -777,6 +781,9 @@ def set_rank(request, user_id):
             )
     else:
         new_rank = get_object_or_404(Rank, pk=int(rank_id))
+        # Verify the target rank is within the reviewer's permitted tiers
+        if new_rank.review_tier not in user_tiers:
+            return redirect("codex:member_detail", user_id=user_id)
         if existing:
             if existing.rank_id != new_rank.pk:
                 existing.rank = new_rank
@@ -800,6 +807,49 @@ def set_rank(request, user_id):
                 action_type="RANK_CHANGED",
                 details=f"Rank set to {new_rank.name}",
             )
+
+    return redirect("codex:member_detail", user_id=user_id)
+
+
+@login_required
+@permission_required("codex.manage_tags")
+def set_status(request, user_id):
+    """Set a member's status tag (system-managed, mutually exclusive)."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+
+    member = get_object_or_404(User, pk=user_id)
+    tag_id = request.POST.get("tag_id", "").strip()
+    if not tag_id:
+        return redirect("codex:member_detail", user_id=user_id)
+
+    new_tag = get_object_or_404(Tag, pk=int(tag_id), is_system=True)
+
+    # Remove other tags in the same system group
+    sibling_tags = Tag.objects.filter(group=new_tag.group, is_system=True).exclude(pk=new_tag.pk)
+    removed = MemberTag.objects.filter(user=member, tag__in=sibling_tags)
+    for mt in removed.select_related("tag"):
+        MemberAuditLog.objects.create(
+            user=member,
+            actor=request.user,
+            action_type="TAG_REMOVED",
+            details=mt.tag.name,
+        )
+    removed.delete()
+
+    # Add the new tag if not already present
+    _, created = MemberTag.objects.get_or_create(
+        user=member,
+        tag=new_tag,
+        defaults={"assigned_by": request.user},
+    )
+    if created:
+        MemberAuditLog.objects.create(
+            user=member,
+            actor=request.user,
+            action_type="TAG_ADDED",
+            details=new_tag.name,
+        )
 
     return redirect("codex:member_detail", user_id=user_id)
 
@@ -856,8 +906,8 @@ def manage_tags(request):
 
         return redirect("codex:index")
 
-    # GET: render tag form
-    tag_groups = TagGroup.objects.prefetch_related("tags").all()
+    # GET: render tag form (exclude system groups)
+    tag_groups = TagGroup.objects.filter(is_system=False).prefetch_related("tags")
     current_tag_ids = set(
         MemberTag.objects.filter(user=target_user).values_list("tag_id", flat=True)
     )
@@ -891,12 +941,7 @@ def former_members(request):
     user_ids = [u.pk for u in users]
 
     # Bulk-fetch tags
-    all_member_tags = MemberTag.objects.filter(user_id__in=user_ids).select_related(
-        "tag__group"
-    )
-    tags_by_user = {}
-    for mt in all_member_tags:
-        tags_by_user.setdefault(mt.user_id, []).append(mt.tag)
+    tags_by_user = _bulk_fetch_tags(user_ids)
 
     members = _build_former_members(users, tags_by_user)
 
@@ -960,6 +1005,22 @@ def member_detail(request, user_id):
         notes = MemberNote.objects.filter(user=target_user).select_related("author__profile__main_character")
         audit_logs = MemberAuditLog.objects.filter(user=target_user).select_related("actor__profile__main_character")
 
+    # Fetch system status tags for the status selector
+    status_group = TagGroup.objects.filter(is_system=True, name="Member Status").first()
+    status_tags = list(status_group.tags.order_by("order")) if status_group else []
+    current_status_tag = None
+    if status_tags:
+        member_tag_ids = {t.pk for t in member.get("tags", [])}
+        for st in status_tags:
+            if st.pk in member_tag_ids:
+                current_status_tag = st
+                break
+
+    can_manage_tags = (
+        request.user.pk == target_user.pk
+        or request.user.has_perm("codex.manage_tags")
+    )
+
     context = {
         "member": member,
         "notes": notes,
@@ -967,12 +1028,12 @@ def member_detail(request, user_id):
         "acknowledgements": list(acks),
         "is_former": is_former,
         "can_manage_reviews": has_any_review_perm,
-        "can_manage_tags": (
-            request.user.pk == target_user.pk
-            or request.user.has_perm("codex.manage_tags")
-        ),
-        "all_ranks": Rank.objects.order_by("priority"),
+        "can_manage_tags": can_manage_tags,
+        "all_ranks": Rank.objects.filter(review_tier__in=user_tiers).order_by("priority") if user_tiers else Rank.objects.none(),
         "can_set_rank": has_any_review_perm and not is_former,
+        "status_tags": status_tags,
+        "current_status_tag": current_status_tag,
+        "can_set_status": request.user.has_perm("codex.manage_tags") and not is_former,
     }
     return render(request, "codex/member_detail.html", context)
 

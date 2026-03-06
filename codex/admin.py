@@ -21,11 +21,17 @@ class TagInline(admin.TabularInline):
     model = Tag
     extra = 1
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(is_system=False)
+
 
 @admin.register(TagGroup)
 class TagGroupAdmin(admin.ModelAdmin):
     list_display = ("name", "order")
     inlines = [TagInline]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(is_system=False)
 
 
 @admin.register(MemberRank)

@@ -96,7 +96,11 @@
                                     <i class="fa-solid fa-clock"></i> {% trans "Review Due" %}
                                 </span>
                                 {% endif %}
-                                {% if member.rank_mismatch %}
+                                {% if member.inactive_has_roles %}
+                                <span class="badge bg-danger">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Inactive — roles to remove" %}
+                                </span>
+                                {% elif member.rank_mismatch %}
                                 <span class="badge bg-warning text-dark">
                                     <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Rank Mismatch" %}
                                 </span>
@@ -244,7 +248,15 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                {% if member.rank_mismatch %}
+                {% if member.inactive_has_roles %}
+                <div class="alert alert-danger py-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    {% trans "Inactive — in-game roles should be removed:" %}
+                    {% for rname in member.inactive_role_names %}
+                    <span class="badge bg-danger">{{ rname }}</span>
+                    {% endfor %}
+                </div>
+                {% elif member.rank_mismatch %}
                 <div class="alert alert-warning py-2">
                     <i class="fa-solid fa-triangle-exclamation"></i>
                     {% trans "This member has different ranks across characters:" %}

@@ -149,7 +149,9 @@
                             <td>
                                 {% if member.rank %}
                                 <span class="badge bg-info">{{ member.rank.display_label }}</span>
-                                {% if member.rank_mismatch %}
+                                {% if member.inactive_has_roles %}
+                                <i class="fa-solid fa-triangle-exclamation text-danger" title="{% trans 'Inactive — in-game roles should be removed' %}"></i>
+                                {% elif member.rank_mismatch %}
                                 <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch:' %} {% for r in member.all_ranks %}{{ r.display_label }}{% if not forloop.last %}, {% endif %}{% endfor %}"></i>
                                 {% endif %}
                                 {% if member.review_due %}

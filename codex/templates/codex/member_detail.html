@@ -60,7 +60,16 @@
                     <div class="mt-2">
                         {% if member.rank %}
                         <span class="badge bg-info">{{ member.rank.display_label }}</span>
-                        {% if member.rank_mismatch %}
+                        {% if member.inactive_has_roles %}
+                        <div class="mt-1">
+                            <i class="fa-solid fa-triangle-exclamation text-danger"></i>
+                            <small class="text-danger">{% trans "Inactive — in-game roles should be removed:" %}
+                                {% for rname in member.inactive_role_names %}
+                                <span class="badge bg-danger">{{ rname }}</span>
+                                {% endfor %}
+                            </small>
+                        </div>
+                        {% elif member.rank_mismatch %}
                         <div class="mt-1">
                             <i class="fa-solid fa-triangle-exclamation text-warning"></i>
                             <small class="text-warning">{% trans "Rank mismatch:" %}
@@ -84,6 +93,17 @@
                             <option value="0">{% trans "No rank" %}</option>
                             {% for r in all_ranks %}
                             <option value="{{ r.pk }}" {% if member.rank and member.rank.pk == r.pk %}selected{% endif %}>{{ r.display_label }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">{% trans "Set" %}</button>
+                    </form>
+                    {% endif %}
+                    {% if can_set_status and status_tags %}
+                    <form method="post" action="{% url 'codex:set_status' member.user.pk %}" class="mt-2 d-inline-flex align-items-center gap-1">
+                        {% csrf_token %}
+                        <select name="tag_id" class="form-select form-select-sm" style="width: auto;">
+                            {% for st in status_tags %}
+                            <option value="{{ st.pk }}" {% if current_status_tag and current_status_tag.pk == st.pk %}selected{% endif %}>{{ st.name }}</option>
                             {% endfor %}
                         </select>
                         <button type="submit" class="btn btn-sm btn-outline-primary">{% trans "Set" %}</button>

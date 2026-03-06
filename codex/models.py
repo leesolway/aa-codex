@@ -30,6 +30,7 @@ class CodexConfiguration(SingletonModel):
 class TagGroup(models.Model):
     name = models.CharField(max_length=100)
     order = models.PositiveIntegerField(default=0)
+    is_system = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["order"]
@@ -47,6 +48,7 @@ class Tag(models.Model):
         help_text="Automatically assign this tag to new members.",
     )
     order = models.PositiveIntegerField(default=0)
+    is_system = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["order"]
