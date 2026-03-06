@@ -768,8 +768,8 @@ def set_rank(request, user_id):
     old_rank_name = existing.rank.name if existing else None
 
     if not rank_id or rank_id == "0":
-        # Remove rank — only allowed if current rank is within reviewer's tiers
-        if existing and existing.rank.review_tier not in user_tiers:
+        # Remove rank — only allowed if current rank's tier is within reviewer's tiers (or has no tier)
+        if existing and existing.rank.review_tier and existing.rank.review_tier not in user_tiers:
             return redirect("codex:member_detail", user_id=user_id)
         if existing:
             existing.delete()
@@ -781,8 +781,9 @@ def set_rank(request, user_id):
             )
     else:
         new_rank = get_object_or_404(Rank, pk=int(rank_id))
-        # Verify the target rank is within the reviewer's permitted tiers
-        if new_rank.review_tier not in user_tiers:
+        # Ranks with a review tier require the matching permission; ranks without a tier
+        # (like R3/R4) are assignable by anyone with any review permission.
+        if new_rank.review_tier and new_rank.review_tier not in user_tiers:
             return redirect("codex:member_detail", user_id=user_id)
         if existing:
             if existing.rank_id != new_rank.pk:
@@ -1029,7 +1030,7 @@ def member_detail(request, user_id):
         "is_former": is_former,
         "can_manage_reviews": has_any_review_perm,
         "can_manage_tags": can_manage_tags,
-        "all_ranks": Rank.objects.filter(review_tier__in=user_tiers).order_by("priority") if user_tiers else Rank.objects.none(),
+        "all_ranks": Rank.objects.order_by("priority") if has_any_review_perm else Rank.objects.none(),
         "can_set_rank": has_any_review_perm and not is_former,
         "status_tags": status_tags,
         "current_status_tag": current_status_tag,
