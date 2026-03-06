@@ -197,10 +197,13 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
         is_inactive = any(
             t.name == "Inactive" and t.is_system for t in user_tags
         )
-        if is_inactive and all_ranks:
+        if is_inactive:
+            review_due = False
+            days_overdue = 0
             rank_mismatch = False
-            inactive_has_roles = True
-            inactive_role_names = [r.display_label for r in all_ranks]
+            if all_ranks:
+                inactive_has_roles = True
+                inactive_role_names = [r.display_label for r in all_ranks]
 
         members.append(
             {
