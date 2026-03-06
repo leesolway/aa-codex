@@ -283,8 +283,13 @@ def _bulk_fetch_tags(user_ids):
 
 
 def _assign_default_tags(user_ids):
-    """Assign all default tags to users who don't already have them."""
-    default_tags = list(Tag.objects.filter(default=True))
+    """Assign all default tags to users who don't already have them.
+
+    For system tags (e.g. status tags), skip assignment if the user already
+    has any sibling tag in the same system group — this respects mutual
+    exclusivity set by set_status().
+    """
+    default_tags = list(Tag.objects.filter(default=True).select_related("group"))
     if not default_tags:
         return
 
@@ -295,22 +300,38 @@ def _assign_default_tags(user_ids):
         ).values_list("user_id", "tag_id")
     )
 
+    # For system tags, check if the user already has ANY tag in the same system group
+    system_groups = {t.group_id for t in default_tags if t.is_system}
+    users_with_system_group_tag = set()
+    if system_groups:
+        users_with_system_group_tag = set(
+            MemberTag.objects.filter(
+                user_id__in=user_ids,
+                tag__group_id__in=system_groups,
+                tag__is_system=True,
+            ).values_list("user_id", "tag__group_id")
+        )
+
     to_create = []
     audit_entries = []
     for user_id in user_ids:
         for tag in default_tags:
-            if (user_id, tag.pk) not in existing:
-                to_create.append(
-                    MemberTag(user_id=user_id, tag_id=tag.pk, assigned_by=None)
+            if (user_id, tag.pk) in existing:
+                continue
+            # Skip system default if user already has a sibling in that group
+            if tag.is_system and (user_id, tag.group_id) in users_with_system_group_tag:
+                continue
+            to_create.append(
+                MemberTag(user_id=user_id, tag_id=tag.pk, assigned_by=None)
+            )
+            audit_entries.append(
+                MemberAuditLog(
+                    user_id=user_id,
+                    actor=None,
+                    action_type="TAG_ADDED",
+                    details=f"{tag.name} (default)",
                 )
-                audit_entries.append(
-                    MemberAuditLog(
-                        user_id=user_id,
-                        actor=None,
-                        action_type="TAG_ADDED",
-                        details=f"{tag.name} (default)",
-                    )
-                )
+            )
 
     if to_create:
         MemberTag.objects.bulk_create(to_create, ignore_conflicts=True)
