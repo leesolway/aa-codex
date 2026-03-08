@@ -86,6 +86,11 @@ class Rank(models.Model):
         (3, "Tier 3 (R3)"),
     ]
 
+    RANK_TYPE_CHOICES = [
+        ("PRIMARY", "Primary Rank"),
+        ("SPECIAL", "Special Role"),
+    ]
+
     name = models.CharField(max_length=50, unique=True)
     display_label = models.CharField(max_length=100)
     eve_title = models.CharField(
@@ -94,6 +99,12 @@ class Rank(models.Model):
     )
     priority = models.PositiveIntegerField(
         help_text="Lower = lower rank. Used for ordering.",
+    )
+    rank_type = models.CharField(
+        max_length=10,
+        choices=RANK_TYPE_CHOICES,
+        default="PRIMARY",
+        help_text="Primary ranks are mutually exclusive; special roles can stack.",
     )
     review_threshold_days = models.PositiveIntegerField(
         null=True,
@@ -113,6 +124,14 @@ class Rank(models.Model):
 
     class Meta:
         ordering = ["priority"]
+
+    @property
+    def is_primary(self):
+        return self.rank_type == "PRIMARY"
+
+    @property
+    def is_special(self):
+        return self.rank_type == "SPECIAL"
 
     def __str__(self):
         return f"{self.name} ({self.display_label})"
@@ -178,10 +197,10 @@ class ReviewAcknowledgement(models.Model):
 
 
 class MemberRank(models.Model):
-    user = models.OneToOneField(
+    user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="codex_rank",
+        related_name="codex_ranks",
     )
     rank = models.ForeignKey(Rank, on_delete=models.CASCADE)
     assigned_by = models.ForeignKey(
@@ -192,6 +211,9 @@ class MemberRank(models.Model):
         related_name="codex_rank_assignments",
     )
     assigned_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("user", "rank")]
 
     def __str__(self):
         return f"{self.user} - {self.rank.name}"

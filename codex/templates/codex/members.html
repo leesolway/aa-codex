@@ -30,7 +30,7 @@
                     {% endif %}
                 </button>
                 {% if has_active_filters %}
-                <a href="{% url 'codex:index' %}" class="btn btn-sm btn-danger ms-1">
+                <a href="{% url 'codex:member_list' %}" class="btn btn-sm btn-danger ms-1">
                     <i class="fa-solid fa-xmark"></i> {% trans "Clear All" %}
                 </a>
                 <span class="text-muted ms-2 small">{% trans "Showing" %} {{ filtered_count }} {% trans "of" %} {{ member_count }}</span>
@@ -152,13 +152,19 @@
                                 {% if member.inactive_has_roles %}
                                 <i class="fa-solid fa-triangle-exclamation text-danger" title="{% trans 'Inactive — in-game roles should be removed' %}"></i>
                                 {% elif member.rank_mismatch %}
-                                <i class="fa-solid fa-triangle-exclamation text-warning" title="{% trans 'Rank mismatch:' %} {% for r in member.all_ranks %}{{ r.display_label }}{% if not forloop.last %}, {% endif %}{% endfor %}"></i>
+                                <i class="fa-solid fa-triangle-exclamation text-warning" title="EVE titles out of sync:&#10;{% for detail in member.rank_mismatch_details %}{{ detail }}{% if not forloop.last %}&#10;{% endif %}{% endfor %}"></i>
                                 {% endif %}
                                 {% if member.review_due %}
                                 <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>
                                 {% endif %}
                                 {% else %}
                                 <span class="text-muted">-</span>
+                                {% endif %}
+                                {% for sr in member.special_roles %}
+                                <span class="badge" style="background-color: #6f42c1;">{{ sr.display_label }}</span>
+                                {% endfor %}
+                                {% if member.special_mismatch %}
+                                <i class="fa-solid fa-triangle-exclamation text-warning" title="EVE titles out of sync:&#10;{% for sm in member.special_mismatch_details %}{% if sm.type == 'title_not_in_codex' %}{{ sm.chars|join:', ' }} has EVE title for {{ sm.rank.display_label }} — remove title or assign in Codex{% else %}{{ sm.rank.display_label }} assigned in Codex — EVE title needs to be added{% endif %}{% if not forloop.last %}&#10;{% endif %}{% endfor %}"></i>
                                 {% endif %}
                             </td>
                             <td>
@@ -209,7 +215,7 @@
                             <td colspan="10" class="text-center text-muted py-4">
                                 {% if has_active_filters %}
                                 {% trans "No members match the current filters." %}
-                                <a href="{% url 'codex:index' %}">{% trans "Clear filters" %}</a>
+                                <a href="{% url 'codex:member_list' %}">{% trans "Clear filters" %}</a>
                                 {% else %}
                                 {% trans "No members found." %}
                                 {% endif %}

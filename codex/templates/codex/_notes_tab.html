@@ -1,0 +1,24 @@
+{% load i18n %}
+{% load codex_tags %}
+<div class="card border-top-0 rounded-top-0">
+    <div class="card-body">
+        <form id="add-note-form" method="post" action="{% url 'codex:add_note' user_id %}" class="mb-3">
+            {% csrf_token %}
+            <div class="input-group">
+                <textarea name="content" class="form-control" rows="2" placeholder="{% trans 'Add a note...' %}" required></textarea>
+                <button type="submit" class="btn btn-primary">{% trans "Add Note" %}</button>
+            </div>
+        </form>
+        {% for note in notes %}
+        <div class="border-bottom pb-2 mb-2">
+            <div class="d-flex justify-content-between">
+                <strong>{{ note.author|main_character_name }}</strong>
+                <small class="text-muted">{{ note.created_at|date:"Y-m-d H:i" }}</small>
+            </div>
+            <p class="mb-0">{{ note.content }}</p>
+        </div>
+        {% empty %}
+        <span class="text-muted">{% trans "No notes yet." %}</span>
+        {% endfor %}
+    </div>
+</div>

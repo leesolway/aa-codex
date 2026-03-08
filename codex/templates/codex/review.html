@@ -102,7 +102,12 @@
                                 </span>
                                 {% elif member.rank_mismatch %}
                                 <span class="badge bg-warning text-dark">
-                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Rank Mismatch" %}
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "EVE Title Mismatch" %}
+                                </span>
+                                {% endif %}
+                                {% if member.special_mismatch %}
+                                <span class="badge bg-warning text-dark">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Role Title Mismatch" %}
                                 </span>
                                 {% endif %}
                                 {% if member.incomplete_checklist %}
@@ -259,10 +264,34 @@
                 {% elif member.rank_mismatch %}
                 <div class="alert alert-warning py-2">
                     <i class="fa-solid fa-triangle-exclamation"></i>
-                    {% trans "This member has different ranks across characters:" %}
-                    {% for r in member.all_ranks %}
-                    <span class="badge bg-info">{{ r.display_label }}</span>
-                    {% endfor %}
+                    {% trans "EVE titles out of sync:" %}
+                    <ul class="mb-0 mt-1">
+                        {% for detail in member.rank_mismatch_details %}
+                        <li>{{ detail }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% if member.special_mismatch %}
+                <div class="alert alert-warning py-2">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    {% trans "EVE titles out of sync:" %}
+                    <ul class="mb-0 mt-1">
+                        {% for sm in member.special_mismatch_details %}
+                        {% if sm.type == "title_not_in_codex" %}
+                        <li>
+                            {{ sm.chars|join:", " }} {% trans "has EVE title for" %}
+                            <span class="badge bg-warning text-dark">{{ sm.rank.display_label }}</span>
+                            {% trans "— remove EVE title or assign role in Codex" %}
+                        </li>
+                        {% else %}
+                        <li>
+                            <span class="badge bg-warning text-dark">{{ sm.rank.display_label }}</span>
+                            {% trans "is assigned in Codex — EVE title needs to be added in-game" %}
+                        </li>
+                        {% endif %}
+                        {% endfor %}
+                    </ul>
                 </div>
                 {% endif %}
 

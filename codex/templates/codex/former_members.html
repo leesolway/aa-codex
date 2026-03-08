@@ -26,9 +26,10 @@
                         <tr>
                             <th style="width: 40px;"></th>
                             <th>{% trans "Character" %}</th>
+                            <th>{% trans "Account" %}</th>
                             <th>{% trans "Corporation" %}</th>
+                            <th>{% trans "Characters" %}</th>
                             <th>{% trans "Tags" %}</th>
-                            <th class="text-center">{% trans "Alts" %}</th>
                             <th class="text-center">{% trans "Links" %}</th>
                         </tr>
                     </thead>
@@ -48,6 +49,9 @@
                             </td>
                             <td class="member-name">{{ member.character_name }}</td>
                             <td>
+                                <small class="text-muted">{{ member.user.username }}</small>
+                            </td>
+                            <td>
                                 {% if member.corporation_id %}
                                 <img src="{% eve_image 'corporation' member.corporation_id 32 %}"
                                      alt="{{ member.corporation_name }}"
@@ -58,18 +62,23 @@
                                 {% endif %}
                             </td>
                             <td>
+                                {% if member.alts %}
+                                <small>
+                                    {% for alt in member.alts %}
+                                    <img src="{% eve_image 'character' alt.character_id 20 %}"
+                                         alt="{{ alt.character_name }}"
+                                         class="rounded" width="20" height="20" loading="lazy">
+                                    {{ alt.character_name }}{% if not forloop.last %}, {% endif %}
+                                    {% endfor %}
+                                </small>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
                                 {% for tag in member.tags %}
                                 <span class="badge bg-{{ tag.color }}">{{ tag.name }}</span>
                                 {% endfor %}
-                            </td>
-                            <td class="text-center">
-                                {% if member.alt_count > 0 %}
-                                <a href="{% url 'codex:member_detail' member.user.pk %}" onclick="event.stopPropagation();">
-                                    <span class="badge bg-secondary">{{ member.alt_count }}</span>
-                                </a>
-                                {% else %}
-                                <span class="text-muted">0</span>
-                                {% endif %}
                             </td>
                             <td class="text-center">
                                 {% if member.character_id %}
@@ -112,7 +121,8 @@ document.addEventListener("DOMContentLoaded", function() {
         rows.forEach(function(row) {
             const name = row.querySelector(".member-name").textContent.toLowerCase();
             const altNames = (row.getAttribute("data-alt-names") || "").toLowerCase();
-            row.style.display = (name.includes(term) || altNames.includes(term)) ? "" : "none";
+            const rowText = row.textContent.toLowerCase();
+            row.style.display = (name.includes(term) || altNames.includes(term) || rowText.includes(term)) ? "" : "none";
         });
     });
 });

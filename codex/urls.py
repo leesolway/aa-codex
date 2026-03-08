@@ -5,7 +5,8 @@ from . import views
 app_name = "codex"
 
 urlpatterns = [
-    path("", views.index, name="index"),
+    path("", views.dashboard, name="index"),
+    path("members/", views.member_list, name="member_list"),
     path("review/", views.review, name="review"),
     path(
         "review/toggle/<int:user_id>/<int:item_id>/",
@@ -25,6 +26,9 @@ urlpatterns = [
     path("former/", views.former_members, name="former_members"),
     path("tags/", views.manage_tags, name="manage_tags"),
     path("member/<int:user_id>/", views.member_detail, name="member_detail"),
+    path("member/<int:user_id>/notes/", views.member_notes_partial, name="member_notes"),
+    path("member/<int:user_id>/audit/", views.member_audit_partial, name="member_audit"),
+    path("member/<int:user_id>/reviews/", views.member_reviews_partial, name="member_reviews"),
     path("member/<int:user_id>/note/", views.add_note, name="add_note"),
     path("member/<int:user_id>/set-rank/", views.set_rank, name="set_rank"),
     path("member/<int:user_id>/set-status/", views.set_status, name="set_status"),

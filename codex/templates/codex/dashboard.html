@@ -1,0 +1,145 @@
+{% extends 'codex/base.html' %}
+{% load i18n %}
+{% load codex_tags %}
+
+{% block page_title %}{% trans "Corp Codex — Dashboard" %}{% endblock %}
+
+{% block codex_content %}
+<div class="container-fluid mt-3">
+    {% if not state %}
+    <div class="alert alert-warning">
+        {% trans "No state has been configured for the Corporation Codex. An administrator must set the state in the admin panel." %}
+    </div>
+    {% else %}
+
+    <!-- Stat Cards -->
+    <div class="row g-3 mb-3">
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase">{% trans "Total Members" %}</div>
+                    <div class="fs-2 fw-bold">{{ total_members }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase">{% trans "Reviews Due" %}</div>
+                    <div class="fs-2 fw-bold{% if reviews_due > 0 %} text-danger{% endif %}">{{ reviews_due }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase">{% trans "Title Mismatches" %}</div>
+                    <div class="fs-2 fw-bold{% if title_mismatches > 0 %} text-warning{% endif %}">{{ title_mismatches }}</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="text-muted small text-uppercase">{% trans "Inactive with Roles" %}</div>
+                    <div class="fs-2 fw-bold{% if inactive_with_roles > 0 %} text-danger{% endif %}">{{ inactive_with_roles }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Issues Table -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0">{% trans "Issues" %}</h5>
+        </div>
+        <div class="card-body p-0">
+            {% if issue_members %}
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 40px;"></th>
+                            <th>{% trans "Character" %}</th>
+                            <th>{% trans "Corporation" %}</th>
+                            <th>{% trans "Rank" %}</th>
+                            <th>{% trans "Issues" %}</th>
+                            <th>{% trans "Service" %}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member in issue_members %}
+                        <tr class="member-row" style="cursor: pointer;"
+                            onclick="window.location='{% url 'codex:member_detail' member.user.pk %}'">
+                            <td>
+                                <img src="{% eve_image 'character' member.main.character_id 32 %}"
+                                     alt="{{ member.main.character_name }}"
+                                     class="rounded" width="32" height="32" loading="lazy">
+                            </td>
+                            <td>
+                                <a href="{% url 'codex:member_detail' member.user.pk %}" onclick="event.stopPropagation();">
+                                    {{ member.main.character_name }}
+                                </a>
+                            </td>
+                            <td>
+                                <img src="{% eve_image 'corporation' member.main.corporation_id 32 %}"
+                                     alt="{{ member.main.corporation_name }}"
+                                     class="rounded" width="20" height="20" loading="lazy">
+                                {{ member.main.corporation_name }}
+                            </td>
+                            <td>
+                                {% if member.rank %}
+                                <span class="badge bg-info">{{ member.rank.display_label }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                                {% for sr in member.special_roles %}
+                                <span class="badge" style="background-color: #6f42c1;">{{ sr.display_label }}</span>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                {% if member.inactive_has_roles %}
+                                <span class="badge bg-danger">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Inactive with Roles" %}
+                                </span>
+                                {% endif %}
+                                {% if member.rank_mismatch %}
+                                <span class="badge bg-warning text-dark">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Rank Mismatch" %}
+                                </span>
+                                {% endif %}
+                                {% if member.special_mismatch %}
+                                <span class="badge bg-warning text-dark">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> {% trans "Special Role Mismatch" %}
+                                </span>
+                                {% endif %}
+                                {% if member.review_due %}
+                                <span class="badge bg-danger">
+                                    <i class="fa-solid fa-clock"></i> {% trans "Review Due" %}
+                                    {% if member.days_overdue > 0 %}({{ member.days_overdue }}d){% endif %}
+                                </span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if member.service_length %}
+                                <span title="Since {{ member.service_date|date:'Y-m-d' }}">{{ member.service_length }}</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center text-muted py-5">
+                <i class="fa-solid fa-circle-check fa-3x mb-3 text-success"></i>
+                <p class="mb-0">{% trans "No issues found" %}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

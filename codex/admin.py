@@ -13,7 +13,8 @@ class ChecklistItemInline(admin.TabularInline):
 
 @admin.register(Rank)
 class RankAdmin(admin.ModelAdmin):
-    list_display = ("name", "display_label", "eve_title", "priority", "review_threshold_days", "review_tier", "default")
+    list_display = ("name", "display_label", "eve_title", "priority", "rank_type", "review_threshold_days", "review_tier", "default")
+    list_filter = ("rank_type",)
     inlines = [ChecklistItemInline]
 
 
@@ -36,9 +37,13 @@ class TagGroupAdmin(admin.ModelAdmin):
 
 @admin.register(MemberRank)
 class MemberRankAdmin(admin.ModelAdmin):
-    list_display = ("user", "rank", "assigned_by", "assigned_at")
-    list_filter = ("rank",)
+    list_display = ("user", "rank", "rank_type_display", "assigned_by", "assigned_at")
+    list_filter = ("rank", "rank__rank_type")
     readonly_fields = ("user", "rank", "assigned_by", "assigned_at")
+
+    @admin.display(description="Type", ordering="rank__rank_type")
+    def rank_type_display(self, obj):
+        return obj.rank.get_rank_type_display()
 
 
 @admin.register(MemberAuditLog)

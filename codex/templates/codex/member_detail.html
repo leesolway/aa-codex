@@ -58,57 +58,22 @@
                     <p class="mb-1"><small class="text-muted">{{ member.titles }}</small></p>
                     {% endif %}
                     <div class="mt-2">
+                        <span id="rank-badge-display">
                         {% if member.rank %}
                         <span class="badge bg-info">{{ member.rank.display_label }}</span>
-                        {% if member.inactive_has_roles %}
-                        <div class="mt-1">
-                            <i class="fa-solid fa-triangle-exclamation text-danger"></i>
-                            <small class="text-danger">{% trans "Inactive — in-game roles should be removed:" %}
-                                {% for rname in member.inactive_role_names %}
-                                <span class="badge bg-danger">{{ rname }}</span>
-                                {% endfor %}
-                            </small>
-                        </div>
-                        {% elif member.rank_mismatch %}
-                        <div class="mt-1">
-                            <i class="fa-solid fa-triangle-exclamation text-warning"></i>
-                            <small class="text-warning">{% trans "Rank mismatch:" %}
-                                {% for r in member.all_ranks %}
-                                <span class="badge bg-warning text-dark">{{ r.display_label }}</span>
-                                {% endfor %}
-                            </small>
-                        </div>
-                        {% endif %}
-                        {% if member.review_due %}
-                        <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>
-                        {% endif %}
                         {% else %}
                         <span class="text-muted">{% trans "No rank" %}</span>
                         {% endif %}
+                        </span>
+                        <span id="special-badges-display">
+                        {% for sr in member.special_roles %}
+                        <span class="badge bg-purple" style="background-color: #6f42c1;">{{ sr.display_label }}</span>
+                        {% endfor %}
+                        </span>
+                        {% if member.rank and member.review_due %}
+                        <i class="fa-solid fa-clock text-danger" title="{% trans 'Review due' %}"></i>
+                        {% endif %}
                     </div>
-                    {% if can_set_rank %}
-                    <form method="post" action="{% url 'codex:set_rank' member.user.pk %}" class="mt-2 d-inline-flex align-items-center gap-1">
-                        {% csrf_token %}
-                        <select name="rank_id" class="form-select form-select-sm" style="width: auto;">
-                            <option value="0">{% trans "No rank" %}</option>
-                            {% for r in all_ranks %}
-                            <option value="{{ r.pk }}" {% if member.rank and member.rank.pk == r.pk %}selected{% endif %}>{{ r.display_label }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-sm btn-outline-primary">{% trans "Set" %}</button>
-                    </form>
-                    {% endif %}
-                    {% if can_set_status and status_tags %}
-                    <form method="post" action="{% url 'codex:set_status' member.user.pk %}" class="mt-2 d-inline-flex align-items-center gap-1">
-                        {% csrf_token %}
-                        <select name="tag_id" class="form-select form-select-sm" style="width: auto;">
-                            {% for st in status_tags %}
-                            <option value="{{ st.pk }}" {% if current_status_tag and current_status_tag.pk == st.pk %}selected{% endif %}>{{ st.name }}</option>
-                            {% endfor %}
-                        </select>
-                        <button type="submit" class="btn btn-sm btn-outline-primary">{% trans "Set" %}</button>
-                    </form>
-                    {% endif %}
                     {% if member.service_length %}
                     <p class="mt-2 mb-0">
                         <i class="fa-solid fa-calendar-days text-muted"></i>
@@ -137,10 +102,128 @@
             </div>
         </div>
 
-        <!-- Tags + Alts -->
-        <div class="col-lg-8 mb-3">
-            <!-- Alts -->
-            <div class="card mb-3">
+        {% if can_set_rank or can_set_status %}
+        <!-- Manage Member -->
+        <div class="col-lg-4 mb-3">
+            <div class="card" id="manage-member-card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fa-solid fa-user-gear"></i> {% trans "Manage Member" %}</h5>
+                </div>
+                <div class="card-body">
+                    {% if can_set_rank %}
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold" for="rank-select">{% trans "Primary Rank" %}</label>
+                        <select id="rank-select" class="form-select"
+                                data-url="{% url 'codex:set_rank' member.user.pk %}">
+                            <option value="0"{% if not member.rank %} selected{% endif %}>{% trans "No rank" %}</option>
+                            {% for r in all_ranks %}
+                            <option value="{{ r.pk }}"{% if member.rank and member.rank.pk == r.pk %} selected{% endif %}>{{ r.display_label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    {% if all_special_roles %}
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">{% trans "Special Roles" %}</label>
+                        <div id="special-role-buttons">
+                            {% for sr in all_special_roles %}
+                            <button type="button"
+                                    class="btn btn-sm mb-1 {% if sr in member.special_roles %}btn-purple{% else %}btn-outline-secondary{% endif %}"
+                                    style="{% if sr in member.special_roles %}background-color: #6f42c1; border-color: #6f42c1; color: #fff;{% endif %}"
+                                    data-role-id="{{ sr.pk }}"
+                                    data-url="{% url 'codex:set_rank' member.user.pk %}"
+                                    data-active="{% if sr in member.special_roles %}1{% else %}0{% endif %}">
+                                <i class="fa-solid fa-check{% if sr not in member.special_roles %} d-none{% endif %}"></i>
+                                {{ sr.display_label }}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+
+                    {% if can_set_status and status_tags %}
+                    <div class="mb-0">
+                        <label class="form-label fw-semibold">{% trans "Status" %}</label>
+                        <div id="status-buttons" class="btn-group w-100" role="group">
+                            {% for st in status_tags %}
+                            <button type="button"
+                                    class="btn {% if current_status_tag and current_status_tag.pk == st.pk %}btn-{{ st.color }}{% else %}btn-outline-{{ st.color }}{% endif %}"
+                                    data-tag-id="{{ st.pk }}"
+                                    data-color="{{ st.color }}"
+                                    data-url="{% url 'codex:set_status' member.user.pk %}"
+                                    data-active="{% if current_status_tag and current_status_tag.pk == st.pk %}1{% else %}0{% endif %}">
+                                {{ st.name }}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if member.inactive_has_roles or member.rank_mismatch or member.special_mismatch %}
+        <!-- Issues -->
+        <div class="col-lg-4 mb-3">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fa-solid fa-triangle-exclamation text-warning"></i> {% trans "Issues" %}</h5>
+                </div>
+                <div class="card-body">
+                    {% if member.rank and member.inactive_has_roles %}
+                    <div class="alert alert-danger py-2 px-3 {% if member.special_mismatch %}mb-2{% else %}mb-0{% endif %}">
+                        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                        <strong>{% trans "Inactive — in-game roles should be removed:" %}</strong>
+                        <div class="mt-1">
+                            {% for rname in member.inactive_role_names %}
+                            <span class="badge bg-danger">{{ rname }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% elif member.rank and member.rank_mismatch %}
+                    <div class="alert alert-warning py-2 px-3 {% if member.special_mismatch %}mb-2{% else %}mb-0{% endif %}">
+                        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                        <strong>{% trans "EVE titles out of sync" %}</strong>
+                        <ul class="mb-0 mt-1 ps-3">
+                            {% for detail in member.rank_mismatch_details %}
+                            <li>{{ detail }}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    {% if member.special_mismatch %}
+                    <div class="alert alert-warning py-2 px-3 mb-0">
+                        <i class="fa-solid fa-triangle-exclamation me-1"></i>
+                        <strong>{% trans "Special role titles out of sync" %}</strong>
+                        <ul class="mb-0 mt-1 ps-3">
+                            {% for sm in member.special_mismatch_details %}
+                            {% if sm.type == "title_not_in_codex" %}
+                            <li>
+                                {{ sm.chars|join:", " }} {% trans "has EVE title for" %}
+                                <span class="badge bg-warning text-dark">{{ sm.rank.display_label }}</span>
+                                {% trans "— remove EVE title or assign role in Codex" %}
+                            </li>
+                            {% else %}
+                            <li>
+                                <span class="badge bg-warning text-dark">{{ sm.rank.display_label }}</span>
+                                {% trans "is assigned in Codex — EVE title needs to be added in-game" %}
+                            </li>
+                            {% endif %}
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="row">
+        <!-- Alts -->
+        <div class="col-12 mb-3">
+            <div class="card">
                 <div class="card-header">
                     <h5 class="mb-0">{% trans "Alts" %} <span class="badge bg-secondary">{{ member.alt_count }}</span></h5>
                 </div>
@@ -214,124 +297,325 @@
         {% if can_manage_reviews %}
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="notes-tab" data-bs-toggle="tab" data-bs-target="#notes-pane"
-                    type="button" role="tab" aria-controls="notes-pane" aria-selected="true">
+                    type="button" role="tab" aria-controls="notes-pane" aria-selected="true"
+                    data-tab-url="{% url 'codex:member_notes' member.user.pk %}">
                 {% trans "Notes" %}
             </button>
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="audit-tab" data-bs-toggle="tab" data-bs-target="#audit-pane"
-                    type="button" role="tab" aria-controls="audit-pane" aria-selected="false">
+                    type="button" role="tab" aria-controls="audit-pane" aria-selected="false"
+                    data-tab-url="{% url 'codex:member_audit' member.user.pk %}">
                 {% trans "Audit Log" %}
             </button>
         </li>
         {% endif %}
         <li class="nav-item" role="presentation">
             <button class="nav-link {% if not can_manage_reviews %}active{% endif %}" id="reviews-tab" data-bs-toggle="tab" data-bs-target="#reviews-pane"
-                    type="button" role="tab" aria-controls="reviews-pane" aria-selected="{% if not can_manage_reviews %}true{% else %}false{% endif %}">
+                    type="button" role="tab" aria-controls="reviews-pane" aria-selected="{% if not can_manage_reviews %}true{% else %}false{% endif %}"
+                    data-tab-url="{% url 'codex:member_reviews' member.user.pk %}">
                 {% trans "Review History" %}
             </button>
         </li>
     </ul>
     <div class="tab-content" id="detailTabsContent">
         {% if can_manage_reviews %}
-        <!-- Notes Tab -->
         <div class="tab-pane fade show active" id="notes-pane" role="tabpanel" aria-labelledby="notes-tab">
-            <div class="card border-top-0 rounded-top-0">
-                <div class="card-body">
-                    <form method="post" action="{% url 'codex:add_note' member.user.pk %}" class="mb-3">
-                        {% csrf_token %}
-                        <div class="input-group">
-                            <textarea name="content" class="form-control" rows="2" placeholder="{% trans 'Add a note...' %}" required></textarea>
-                            <button type="submit" class="btn btn-primary">{% trans "Add Note" %}</button>
-                        </div>
-                    </form>
-                    {% for note in notes %}
-                    <div class="border-bottom pb-2 mb-2">
-                        <div class="d-flex justify-content-between">
-                            <strong>{{ note.author|main_character_name }}</strong>
-                            <small class="text-muted">{{ note.created_at|date:"Y-m-d H:i" }}</small>
-                        </div>
-                        <p class="mb-0">{{ note.content }}</p>
-                    </div>
-                    {% empty %}
-                    <span class="text-muted">{% trans "No notes yet." %}</span>
-                    {% endfor %}
-                </div>
-            </div>
+            <div class="text-center py-4"><div class="spinner-border text-secondary" role="status"><span class="visually-hidden">{% trans "Loading..." %}</span></div></div>
         </div>
-
-        <!-- Audit Log Tab -->
         <div class="tab-pane fade" id="audit-pane" role="tabpanel" aria-labelledby="audit-tab">
-            <div class="card border-top-0 rounded-top-0">
-                <div class="card-body p-0">
-                    {% if audit_logs %}
-                    <div class="table-responsive">
-                        <table class="table table-striped mb-0">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>{% trans "Date" %}</th>
-                                    <th>{% trans "By" %}</th>
-                                    <th>{% trans "Action" %}</th>
-                                    <th>{% trans "Details" %}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for log in audit_logs %}
-                                <tr>
-                                    <td>{{ log.created_at|date:"Y-m-d H:i" }}</td>
-                                    <td>{{ log.actor|main_character_name }}</td>
-                                    <td>{{ log.get_action_type_display }}</td>
-                                    <td>{{ log.details }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="card-body">
-                        <span class="text-muted">{% trans "No audit log entries." %}</span>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
+            <div class="text-center py-4"><div class="spinner-border text-secondary" role="status"><span class="visually-hidden">{% trans "Loading..." %}</span></div></div>
         </div>
         {% endif %}
-
-        <!-- Review History Tab -->
         <div class="tab-pane fade {% if not can_manage_reviews %}show active{% endif %}" id="reviews-pane" role="tabpanel" aria-labelledby="reviews-tab">
-            <div class="card border-top-0 rounded-top-0">
-                <div class="card-body p-0">
-                    {% if acknowledgements %}
-                    <div class="table-responsive">
-                        <table class="table table-striped mb-0">
-                            <thead class="table-dark">
-                                <tr>
-                                    <th>{% trans "Date" %}</th>
-                                    <th>{% trans "By" %}</th>
-                                    <th>{% trans "Rank" %}</th>
-                                    <th>{% trans "Note" %}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for ack in acknowledgements %}
-                                <tr>
-                                    <td>{{ ack.acknowledged_at|date:"Y-m-d H:i" }}</td>
-                                    <td>{{ ack.acknowledged_by|main_character_name }}</td>
-                                    <td><span class="badge bg-info">{{ ack.rank.display_label }}</span></td>
-                                    <td>{{ ack.note }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    {% else %}
-                    <div class="card-body">
-                        <span class="text-muted">{% trans "No review history." %}</span>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
+            <div class="text-center py-4"><div class="spinner-border text-secondary" role="status"><span class="visually-hidden">{% trans "Loading..." %}</span></div></div>
         </div>
     </div>
 </div>
+
+{% if can_set_rank or can_set_status %}
+<!-- Toast container -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;">
+    <div id="manage-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="manage-toast-body"></div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_javascript %}
+{% if can_set_rank or can_set_status %}
+<script>
+(function() {
+    "use strict";
+
+    function getCookie(name) {
+        var cookieValue = null;
+        if (document.cookie && document.cookie !== "") {
+            var cookies = document.cookie.split(";");
+            for (var i = 0; i < cookies.length; i++) {
+                var cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + "=")) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    var csrftoken = getCookie("csrftoken");
+
+    var toastEl = document.getElementById("manage-toast");
+    var toastBody = document.getElementById("manage-toast-body");
+    var bsToast = toastEl ? new bootstrap.Toast(toastEl, {delay: 3000}) : null;
+
+    function showToast(message, type) {
+        if (!bsToast) return;
+        toastEl.className = "toast align-items-center border-0 text-bg-" + (type || "success");
+        toastBody.textContent = message;
+        bsToast.show();
+    }
+
+    function postJSON(url, data) {
+        var body = new URLSearchParams();
+        for (var key in data) {
+            body.append(key, data[key]);
+        }
+        return fetch(url, {
+            method: "POST",
+            headers: {
+                "X-CSRFToken": csrftoken,
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: body
+        }).then(function(resp) {
+            if (!resp.ok) throw new Error(resp.status);
+            return resp.json();
+        });
+    }
+
+    function updateBadges(data) {
+        var rankDisplay = document.getElementById("rank-badge-display");
+        if (rankDisplay) {
+            if (data.rank) {
+                rankDisplay.innerHTML = '<span class="badge bg-info">' + escapeHtml(data.rank.label) + '</span>';
+            } else {
+                rankDisplay.innerHTML = '<span class="text-muted">{% filter escapejs %}{% trans "No rank" %}{% endfilter %}</span>';
+            }
+        }
+        var specialDisplay = document.getElementById("special-badges-display");
+        if (specialDisplay) {
+            var html = "";
+            for (var i = 0; i < data.special_roles.length; i++) {
+                html += '<span class="badge bg-purple" style="background-color: #6f42c1;">' + escapeHtml(data.special_roles[i].label) + '</span> ';
+            }
+            specialDisplay.innerHTML = html;
+        }
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement("div");
+        div.appendChild(document.createTextNode(text));
+        return div.innerHTML;
+    }
+
+    // Primary Rank select
+    var rankSelect = document.getElementById("rank-select");
+    if (rankSelect) {
+        rankSelect.addEventListener("change", function() {
+            var select = this;
+            select.disabled = true;
+            var url = select.getAttribute("data-url");
+            postJSON(url, {rank_id: select.value})
+                .then(function(data) {
+                    updateBadges(data);
+                    showToast("{% filter escapejs %}{% trans "Rank updated" %}{% endfilter %}", "success");
+                })
+                .catch(function() {
+                    showToast("{% filter escapejs %}{% trans "Failed to update rank" %}{% endfilter %}", "danger");
+                })
+                .finally(function() {
+                    select.disabled = false;
+                });
+        });
+    }
+
+    // Special Role toggle buttons
+    var roleButtons = document.getElementById("special-role-buttons");
+    if (roleButtons) {
+        roleButtons.addEventListener("click", function(e) {
+            var btn = e.target.closest("button[data-role-id]");
+            if (!btn || btn.disabled) return;
+
+            var buttons = roleButtons.querySelectorAll("button[data-role-id]");
+            buttons.forEach(function(b) { b.disabled = true; });
+
+            var wasActive = btn.getAttribute("data-active") === "1";
+            // Optimistic toggle
+            toggleRoleButton(btn, !wasActive);
+
+            var url = btn.getAttribute("data-url");
+            postJSON(url, {rank_id: btn.getAttribute("data-role-id")})
+                .then(function(data) {
+                    updateBadges(data);
+                    // Sync button states from server response
+                    var activeIds = data.special_roles.map(function(r) { return String(r.id); });
+                    buttons.forEach(function(b) {
+                        var isActive = activeIds.indexOf(b.getAttribute("data-role-id")) !== -1;
+                        toggleRoleButton(b, isActive);
+                    });
+                    showToast("{% filter escapejs %}{% trans "Role updated" %}{% endfilter %}", "success");
+                })
+                .catch(function() {
+                    // Revert
+                    toggleRoleButton(btn, wasActive);
+                    showToast("{% filter escapejs %}{% trans "Failed to update role" %}{% endfilter %}", "danger");
+                })
+                .finally(function() {
+                    buttons.forEach(function(b) { b.disabled = false; });
+                });
+        });
+    }
+
+    function toggleRoleButton(btn, active) {
+        var icon = btn.querySelector("i.fa-check");
+        if (active) {
+            btn.setAttribute("data-active", "1");
+            btn.className = "btn btn-sm mb-1 btn-purple";
+            btn.style.backgroundColor = "#6f42c1";
+            btn.style.borderColor = "#6f42c1";
+            btn.style.color = "#fff";
+            if (icon) icon.classList.remove("d-none");
+        } else {
+            btn.setAttribute("data-active", "0");
+            btn.className = "btn btn-sm mb-1 btn-outline-secondary";
+            btn.style.backgroundColor = "";
+            btn.style.borderColor = "";
+            btn.style.color = "";
+            if (icon) icon.classList.add("d-none");
+        }
+    }
+
+    // Status buttons
+    var statusGroup = document.getElementById("status-buttons");
+    if (statusGroup) {
+        statusGroup.addEventListener("click", function(e) {
+            var btn = e.target.closest("button[data-tag-id]");
+            if (!btn || btn.disabled) return;
+            if (btn.getAttribute("data-active") === "1") return; // already active
+
+            var buttons = statusGroup.querySelectorAll("button[data-tag-id]");
+            buttons.forEach(function(b) { b.disabled = true; });
+
+            // Save previous state for revert
+            var prevActive = statusGroup.querySelector('button[data-active="1"]');
+
+            // Optimistic toggle
+            buttons.forEach(function(b) {
+                var color = b.getAttribute("data-color");
+                if (b === btn) {
+                    b.setAttribute("data-active", "1");
+                    b.className = "btn btn-" + color;
+                } else {
+                    b.setAttribute("data-active", "0");
+                    b.className = "btn btn-outline-" + color;
+                }
+            });
+
+            var url = btn.getAttribute("data-url");
+            postJSON(url, {tag_id: btn.getAttribute("data-tag-id")})
+                .then(function() {
+                    showToast("{% filter escapejs %}{% trans "Status updated" %}{% endfilter %}", "success");
+                })
+                .catch(function() {
+                    // Revert
+                    buttons.forEach(function(b) {
+                        var color = b.getAttribute("data-color");
+                        if (b === prevActive) {
+                            b.setAttribute("data-active", "1");
+                            b.className = "btn btn-" + color;
+                        } else {
+                            b.setAttribute("data-active", "0");
+                            b.className = "btn btn-outline-" + color;
+                        }
+                    });
+                    showToast("{% filter escapejs %}{% trans "Failed to update status" %}{% endfilter %}", "danger");
+                })
+                .finally(function() {
+                    buttons.forEach(function(b) { b.disabled = false; });
+                });
+        });
+    }
+})();
+</script>
+{% endif %}
+<script>
+(function() {
+    "use strict";
+
+    var spinner = '<div class="text-center py-4"><div class="spinner-border text-secondary" role="status"></div></div>';
+
+    function loadTabContent(button) {
+        var url = button.getAttribute("data-tab-url");
+        var target = button.getAttribute("data-bs-target");
+        var pane = document.querySelector(target);
+        if (!url || !pane) return;
+
+        pane.innerHTML = spinner;
+        fetch(url, {headers: {"X-Requested-With": "XMLHttpRequest"}})
+            .then(function(resp) {
+                if (!resp.ok) throw new Error(resp.status);
+                return resp.text();
+            })
+            .then(function(html) {
+                pane.innerHTML = html;
+                var form = pane.querySelector("#add-note-form");
+                if (form) attachNoteForm(form, button);
+            })
+            .catch(function() {
+                pane.innerHTML = '<div class="card border-top-0 rounded-top-0"><div class="card-body"><span class="text-danger">{% filter escapejs %}{% trans "Failed to load content." %}{% endfilter %}</span></div></div>';
+            });
+    }
+
+    function attachNoteForm(form, tabButton) {
+        form.addEventListener("submit", function(e) {
+            e.preventDefault();
+            var submitBtn = form.querySelector("button[type='submit']");
+            if (submitBtn) submitBtn.disabled = true;
+            fetch(form.action, {
+                method: "POST",
+                headers: {"X-Requested-With": "XMLHttpRequest"},
+                body: new FormData(form)
+            })
+            .then(function(resp) {
+                if (!resp.ok) throw new Error(resp.status);
+                return resp.json();
+            })
+            .then(function() {
+                loadTabContent(tabButton);
+            })
+            .catch(function() {
+                if (submitBtn) submitBtn.disabled = false;
+            });
+        });
+    }
+
+    // Load the active tab on page load
+    var activeTab = document.querySelector("#detailTabs .nav-link.active");
+    if (activeTab) loadTabContent(activeTab);
+
+    // Reload content each time a tab is shown
+    var tabBar = document.getElementById("detailTabs");
+    if (tabBar) {
+        tabBar.addEventListener("shown.bs.tab", function(e) {
+            loadTabContent(e.target);
+        });
+    }
+})();
+</script>
 {% endblock %}

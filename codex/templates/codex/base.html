@@ -13,6 +13,11 @@
 {% block header_nav_collapse_left %}
     <li class="nav-item">
         <a class="nav-link" href="{% url 'codex:index' %}">
+            {% translate "Dashboard" %}
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{% url 'codex:member_list' %}">
             {% translate "Members" %}
         </a>
     </li>

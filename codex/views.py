@@ -1,4 +1,5 @@
 from datetime import timedelta
+from functools import wraps
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required, permission_required
@@ -46,52 +47,151 @@ def _can_review_member(user, rank):
     return rank.review_tier in _get_user_review_tiers(user)
 
 
-def detect_member_rank(main, alts, ranks_by_title):
-    """Detect a member's rank from EVE titles across all characters.
+def _log_audit(user, actor, action_type, details=""):
+    """Create a MemberAuditLog entry."""
+    MemberAuditLog.objects.create(user=user, actor=actor, action_type=action_type, details=details)
 
-    Returns (rank, rank_mismatch, all_ranks).
 
-    Rank mismatch is only flagged when different characters resolve to
-    different highest ranks (e.g. main is R1 but an alt is R2).  A single
-    character holding multiple rank-related titles is not a mismatch.
+def _get_primary_member_rank(user):
+    """Return the user's PRIMARY MemberRank (with rank select_related), or None."""
+    return MemberRank.objects.filter(
+        user=user, rank__rank_type="PRIMARY"
+    ).select_related("rank").first()
+
+
+def _get_character_name(user):
+    """Return the character name for a user, falling back to username."""
+    try:
+        if user.profile.main_character:
+            return user.profile.main_character.character_name
+    except Exception:
+        pass
+    return user.username
+
+
+def _review_tier_required(view_func):
+    """Decorator that redirects to index if the user has no review tier permissions."""
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        if not _get_user_review_tiers(request.user):
+            return redirect("codex:index")
+        return view_func(request, *args, **kwargs)
+    return wrapper
+
+
+def _prepare_members(config):
+    """Fetch users, bulk-load data, assign defaults, build member list.
+
+    Returns (members, user_ids, acks_by_user).
+    """
+    users = _get_users_queryset(config)
+    ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
+    user_ids = [u.pk for u in users]
+    acks_by_user = _bulk_fetch_acks(user_ids)
+    _assign_default_tags(user_ids)
+    ranks_by_user = _bulk_fetch_ranks(user_ids)
+    tags_by_user = _bulk_fetch_tags(user_ids)
+    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
+    return members, user_ids, acks_by_user
+
+
+def detect_member_titles(main, alts, ranks_by_title):
+    """Detect a member's ranks and special roles from EVE titles across all characters.
+
+    Returns a dict:
+        primary: highest detected PRIMARY rank or None
+        primary_mismatch: bool — True when characters disagree on highest primary rank
+        detected_primaries: set of PRIMARY ranks found
+        detected_specials: set of SPECIAL ranks found
+        char_primary_map: list of (character_name, rank) — per-character highest primary
+        char_special_map: list of (character_name, rank) — per-character special roles found
     """
     characters = [main] + list(alts)
-    per_char_ranks = []
-    all_found_ranks = set()
+    per_char_primaries = []
+    all_found_primaries = set()
+    all_found_specials = set()
+    char_primary_map = []
+    char_special_map = []
 
     for char in characters:
         try:
             titles = char.characteraudit.characterroles.titles.all()
-            char_ranks = set()
+            char_primaries = set()
             for t in titles:
-                if t.title in ranks_by_title:
-                    char_ranks.add(ranks_by_title[t.title])
-            if char_ranks:
-                highest = max(char_ranks, key=lambda r: r.priority)
-                per_char_ranks.append(highest)
-                all_found_ranks.update(char_ranks)
+                rank = ranks_by_title.get(t.title)
+                if rank:
+                    if rank.is_special:
+                        all_found_specials.add(rank)
+                        char_special_map.append((char.character_name, rank))
+                    else:
+                        char_primaries.add(rank)
+            if char_primaries:
+                highest = max(char_primaries, key=lambda r: r.priority)
+                per_char_primaries.append(highest)
+                all_found_primaries.update(char_primaries)
+                char_primary_map.append((char.character_name, highest))
         except Exception:
             continue
 
-    if not per_char_ranks:
-        return None, False, set()
+    primary = None
+    primary_mismatch = False
+    if per_char_primaries:
+        distinct = set(per_char_primaries)
+        primary_mismatch = len(distinct) > 1
+        primary = max(per_char_primaries, key=lambda r: r.priority)
 
-    # Mismatch when characters disagree on their highest rank
-    distinct_char_ranks = set(per_char_ranks)
-    rank_mismatch = len(distinct_char_ranks) > 1
+    return {
+        "primary": primary,
+        "primary_mismatch": primary_mismatch,
+        "detected_primaries": all_found_primaries,
+        "detected_specials": all_found_specials,
+        "char_primary_map": char_primary_map,
+        "char_special_map": char_special_map,
+    }
 
-    highest = max(per_char_ranks, key=lambda r: r.priority)
-    return highest, rank_mismatch, distinct_char_ranks
+
+def _bulk_fetch_service_history(users):
+    """Return dict mapping CharacterAudit PK to the latest CorporationHistory."""
+    char_audit_ids = []
+    for user in users:
+        main = user.profile.main_character
+        if not main:
+            continue
+        try:
+            char_audit_ids.append(main.characteraudit.pk)
+        except Exception:
+            continue
+
+    if not char_audit_ids:
+        return {}
+
+    # Get all corp history for these characters, ordered newest-first
+    histories = (
+        CorporationHistory.objects.filter(character_id__in=char_audit_ids)
+        .order_by("character_id", "-start_date")
+    )
+
+    # Keep only the latest entry per character
+    result = {}
+    for h in histories:
+        if h.character_id not in result:
+            result[h.character_id] = h
+
+    return result
 
 
-def _compute_service(main):
-    """Compute service length string and days for a member's main character."""
+def _compute_service(main, history=None):
+    """Compute service length string and days for a member's main character.
+
+    Uses provided history or falls back to DB query.
+    """
     try:
-        history = (
-            CorporationHistory.objects.filter(character=main.characteraudit)
-            .order_by("-start_date")
-            .first()
-        )
+        if history is None:
+            history = (
+                CorporationHistory.objects.filter(character=main.characteraudit)
+                .order_by("-start_date")
+                .first()
+            )
         if history:
             delta = timezone.now() - history.start_date
             days = delta.days
@@ -142,9 +242,9 @@ def _review_status(rank, service_days, user, acknowledgements_by_user):
 def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user=None, ranks_by_user=None):
     """Build the member list with stored rank as source of truth.
 
-    ranks_by_user maps user PK to a MemberRank instance. The stored rank is
-    authoritative; EVE title detection is still used to flag mismatches (when
-    a character's detected rank differs from the stored Codex rank).
+    ranks_by_user maps user PK to a list of MemberRank instances. The stored
+    primary rank is authoritative; EVE title detection is still used to flag
+    mismatches (when a character's detected rank differs from the stored Codex rank).
     """
     if tags_by_user is None:
         tags_by_user = {}
@@ -171,21 +271,64 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
 
         service_length, service_date, service_days = _compute_service(main)
 
-        # Use stored rank as the authoritative rank
-        member_rank_obj = ranks_by_user.get(user.pk)
-        stored_rank = member_rank_obj.rank if member_rank_obj else None
+        # Extract stored primary rank and special roles from MemberRank list
+        user_member_ranks = ranks_by_user.get(user.pk, [])
+        stored_rank = None
+        stored_specials = set()
+        for mr in user_member_ranks:
+            if mr.rank.is_primary:
+                stored_rank = mr.rank
+            elif mr.rank.is_special:
+                stored_specials.add(mr.rank)
 
-        # Detect EVE-title rank to check for mismatches against stored rank
-        detected_rank, _, all_ranks = detect_member_rank(main, alts, ranks_by_title)
+        # Detect EVE-title ranks to check for mismatches
+        detection = detect_member_titles(main, alts, ranks_by_title)
+        detected_primary = detection["primary"]
+        detected_primaries = detection["detected_primaries"]
+        detected_specials = detection["detected_specials"]
+        char_primary_map = detection["char_primary_map"]
+        char_special_map = detection["char_special_map"]
 
-        # Mismatch: any character's detected EVE-title rank differs from stored Codex rank
-        if stored_rank and detected_rank:
-            rank_mismatch = any(r != stored_rank for r in all_ranks)
-        elif stored_rank and not detected_rank:
-            # Stored rank but no EVE titles found — flag mismatch
+        # Primary mismatch: detected EVE-title rank differs from stored Codex rank
+        rank_mismatch = False
+        rank_mismatch_details = []
+        if stored_rank and detected_primary:
+            if any(r != stored_rank for r in detected_primaries):
+                rank_mismatch = True
+                for char_name, char_rank in char_primary_map:
+                    if char_rank != stored_rank:
+                        rank_mismatch_details.append(
+                            f"{char_name} has EVE title for {char_rank.display_label}"
+                            f" — should be {stored_rank.display_label}"
+                        )
+        elif stored_rank and not detected_primary:
             rank_mismatch = True
-        else:
-            rank_mismatch = False
+            rank_mismatch_details.append(
+                f"No character has an EVE title matching {stored_rank.display_label}"
+                f" — EVE titles need to be updated"
+            )
+
+        # Special role mismatches
+        missing_specials = detected_specials - stored_specials
+        extra_specials = stored_specials - detected_specials
+        special_mismatch = bool(missing_specials or extra_specials)
+        special_mismatch_details = []
+        if special_mismatch:
+            for rank in sorted(missing_specials, key=lambda r: r.priority):
+                # EVE title present but role not assigned in Codex — title should be removed
+                chars_with = [cn for cn, r in char_special_map if r == rank]
+                special_mismatch_details.append({
+                    "rank": rank,
+                    "type": "title_not_in_codex",
+                    "chars": chars_with,
+                })
+            for rank in sorted(extra_specials, key=lambda r: r.priority):
+                # Role assigned in Codex but EVE title missing — title needs to be added
+                special_mismatch_details.append({
+                    "rank": rank,
+                    "type": "codex_not_in_title",
+                    "chars": [],
+                })
 
         rank = stored_rank
         review_due, days_overdue = _review_status(rank, service_days, user, acknowledgements_by_user)
@@ -201,9 +344,13 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
             review_due = False
             days_overdue = 0
             rank_mismatch = False
-            if all_ranks:
+            special_mismatch = False
+            missing_specials = set()
+            extra_specials = set()
+            all_eve_ranks = detected_primaries | detected_specials
+            if all_eve_ranks:
                 inactive_has_roles = True
-                inactive_role_names = [r.display_label for r in all_ranks]
+                inactive_role_names = [r.display_label for r in all_eve_ranks]
 
         members.append(
             {
@@ -217,7 +364,13 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
                 "service_days": service_days,
                 "rank": rank,
                 "rank_mismatch": rank_mismatch,
-                "all_ranks": all_ranks,
+                "rank_mismatch_details": rank_mismatch_details,
+                "all_ranks": detected_primaries,
+                "special_roles": sorted(stored_specials, key=lambda r: r.priority),
+                "special_mismatch": special_mismatch,
+                "special_mismatch_details": special_mismatch_details,
+                "missing_specials": sorted(missing_specials, key=lambda r: r.priority),
+                "extra_specials": sorted(extra_specials, key=lambda r: r.priority),
                 "review_due": review_due,
                 "days_overdue": days_overdue,
                 "tags": user_tags,
@@ -230,37 +383,14 @@ def _build_members(users, ranks_by_title, acknowledgements_by_user, tags_by_user
     return members
 
 
-def _assign_default_ranks(user_ids):
-    """Assign the default rank to users who don't already have a MemberRank."""
-    default_rank = Rank.objects.filter(default=True).first()
-    if not default_rank:
-        return
-
-    existing_user_ids = set(
-        MemberRank.objects.filter(user_id__in=user_ids).values_list("user_id", flat=True)
-    )
-    missing = [uid for uid in user_ids if uid not in existing_user_ids]
-    if not missing:
-        return
-
-    to_create = [MemberRank(user_id=uid, rank=default_rank, assigned_by=None) for uid in missing]
-    audit_entries = [
-        MemberAuditLog(
-            user_id=uid,
-            actor=None,
-            action_type="RANK_CHANGED",
-            details=f"Default rank assigned: {default_rank.name}",
-        )
-        for uid in missing
-    ]
-    MemberRank.objects.bulk_create(to_create, ignore_conflicts=True)
-    MemberAuditLog.objects.bulk_create(audit_entries)
-
 
 def _bulk_fetch_ranks(user_ids):
-    """Return a dict mapping user PK to MemberRank instance."""
+    """Return a dict mapping user PK to list of MemberRank instances."""
     member_ranks = MemberRank.objects.filter(user_id__in=user_ids).select_related("rank")
-    return {mr.user_id: mr for mr in member_ranks}
+    result = {}
+    for mr in member_ranks:
+        result.setdefault(mr.user_id, []).append(mr)
+    return result
 
 
 def _bulk_fetch_acks(user_ids):
@@ -342,9 +472,12 @@ def _assign_default_tags(user_ids):
 
 
 def _get_users_queryset(config):
-    """Return the base users queryset with needed prefetches."""
+    """Return users in the configured state that have codex data (a MemberRank)."""
+    codex_user_ids = set(
+        MemberRank.objects.values_list("user_id", flat=True)
+    )
     return (
-        User.objects.filter(profile__state=config.aa_state)
+        User.objects.filter(profile__state=config.aa_state, pk__in=codex_user_ids)
         .select_related("profile__main_character")
         .prefetch_related(
             "character_ownerships__character__characteraudit__characterroles__titles",
@@ -354,27 +487,20 @@ def _get_users_queryset(config):
 
 
 def _get_former_users_queryset(config):
-    """Return users who have codex data but are no longer in the configured state."""
-    # Collect user IDs that have ANY codex data
-    codex_user_ids = set()
-    codex_user_ids.update(MemberTag.objects.values_list("user_id", flat=True))
-    codex_user_ids.update(MemberNote.objects.values_list("user_id", flat=True))
-    codex_user_ids.update(MemberAuditLog.objects.values_list("user_id", flat=True))
-    codex_user_ids.update(
-        MemberChecklistCompletion.objects.values_list("user_id", flat=True)
-    )
-    codex_user_ids.update(
-        ReviewAcknowledgement.objects.values_list("user_id", flat=True)
+    """Return users who have a MemberRank but are no longer in the configured state."""
+    # Only users with a MemberRank were ever tracked members
+    tracked_user_ids = set(
+        MemberRank.objects.values_list("user_id", flat=True)
     )
 
-    if not codex_user_ids:
+    if not tracked_user_ids:
         return User.objects.none()
 
     # Subtract users currently in the configured state
     current_user_ids = set(
         User.objects.filter(profile__state=config.aa_state).values_list("pk", flat=True)
     )
-    former_ids = codex_user_ids - current_user_ids
+    former_ids = tracked_user_ids - current_user_ids
 
     if not former_ids:
         return User.objects.none()
@@ -455,35 +581,67 @@ def _build_former_members(users, tags_by_user=None):
 
 @login_required
 @permission_required("codex.view_corpmember")
-def index(request):
+def dashboard(request):
+    config = CodexConfiguration.get_solo()
+
+    if not config.aa_state:
+        return render(request, "codex/dashboard.html", {
+            "state": None,
+            "total_members": 0,
+            "reviews_due": 0,
+            "title_mismatches": 0,
+            "inactive_with_roles": 0,
+            "issue_members": [],
+        })
+
+    members, user_ids, acks_by_user = _prepare_members(config)
+
+    # Compute stats
+    total_members = len(members)
+    reviews_due = sum(1 for m in members if m["review_due"])
+    title_mismatches = sum(1 for m in members if m["rank_mismatch"] or m["special_mismatch"])
+    inactive_with_roles = sum(1 for m in members if m["inactive_has_roles"])
+
+    # Filter to members with any issue
+    issue_members = [
+        m for m in members
+        if m["review_due"] or m["rank_mismatch"] or m["special_mismatch"] or m["inactive_has_roles"]
+    ]
+
+    # Sort by severity: inactive_has_roles (0) > rank/special mismatch (1) > review_due (2)
+    def severity_key(m):
+        if m["inactive_has_roles"]:
+            return (0, -m["days_overdue"], m["main"].character_name)
+        if m["rank_mismatch"] or m["special_mismatch"]:
+            return (1, -m["days_overdue"], m["main"].character_name)
+        return (2, -m["days_overdue"], m["main"].character_name)
+
+    issue_members.sort(key=severity_key)
+
+    return render(request, "codex/dashboard.html", {
+        "state": config.aa_state,
+        "total_members": total_members,
+        "reviews_due": reviews_due,
+        "title_mismatches": title_mismatches,
+        "inactive_with_roles": inactive_with_roles,
+        "issue_members": issue_members,
+    })
+
+
+@login_required
+@permission_required("codex.view_corpmember")
+def member_list(request):
     config = CodexConfiguration.get_solo()
 
     if not config.aa_state:
         return render(request, "codex/members.html", {"members": [], "state": None})
 
-    users = _get_users_queryset(config)
-    ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
-
-    # Bulk-fetch acknowledgements
-    user_ids = [u.pk for u in users]
-    acks_by_user = _bulk_fetch_acks(user_ids)
-
-    # Assign default tags and ranks to any members missing them
-    _assign_default_tags(user_ids)
-    _assign_default_ranks(user_ids)
-
-    # Bulk-fetch ranks
-    ranks_by_user = _bulk_fetch_ranks(user_ids)
-
-    # Bulk-fetch tags
-    tags_by_user = _bulk_fetch_tags(user_ids)
-
-    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
+    members, user_ids, acks_by_user = _prepare_members(config)
 
     # Collect filter options
     all_tags = Tag.objects.select_related("group").order_by("group__order", "order")
     all_ranks = Rank.objects.order_by("priority")
-    all_groups = Group.objects.filter(user__in=users).distinct().order_by("name")
+    all_groups = Group.objects.filter(user__in=user_ids).distinct().order_by("name")
 
     # Read filter params
     active_tag_ids = [int(x) for x in request.GET.getlist("tag") if x.isdigit()]
@@ -569,36 +727,19 @@ def index(request):
 
 
 @login_required
+@_review_tier_required
 def review(request):
     user_tiers = _get_user_review_tiers(request.user)
-    if not user_tiers:
-        return redirect("codex:index")
 
     config = CodexConfiguration.get_solo()
 
     if not config.aa_state:
         return render(request, "codex/review.html", {"members": [], "state": None})
 
-    users = _get_users_queryset(config)
-    ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
+    members, user_ids, acks_by_user = _prepare_members(config)
 
-    # Bulk-fetch acknowledgements
-    user_ids = [u.pk for u in users]
-    acks_by_user = _bulk_fetch_acks(user_ids)
-
-    # Assign default ranks to any members missing them
-    _assign_default_ranks(user_ids)
-
-    # Bulk-fetch ranks
-    ranks_by_user = _bulk_fetch_ranks(user_ids)
-
-    # Bulk-fetch tags
-    tags_by_user = _bulk_fetch_tags(user_ids)
-
-    members = _build_members(users, ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
-
-    # Precompute next rank for each rank (next higher priority)
-    all_ranks_ordered = list(Rank.objects.order_by("priority"))
+    # Precompute next rank for each PRIMARY rank (next higher priority)
+    all_ranks_ordered = list(Rank.objects.filter(rank_type="PRIMARY").order_by("priority"))
     next_rank_map = {}
     for i, r in enumerate(all_ranks_ordered):
         if i + 1 < len(all_ranks_ordered):
@@ -647,7 +788,7 @@ def review(request):
             a for a in acks_by_user.get(m["user"].pk, []) if a.rank_id == rank.pk
         ]
 
-        if m["review_due"] or m["rank_mismatch"]:
+        if m["review_due"] or m["rank_mismatch"] or m.get("special_mismatch"):
             flagged.append(m)
         elif incomplete_checklist:
             action_needed.append(m)
@@ -707,33 +848,17 @@ def toggle_checklist(request, user_id, item_id):
     ).first()
     if existing:
         existing.delete()
-        MemberAuditLog.objects.create(
-            user=member,
-            actor=request.user,
-            action_type="CHECKLIST_UNCOMPLETED",
-            details=item.name,
-        )
+        _log_audit(member, request.user, "CHECKLIST_UNCOMPLETED", item.name)
         completed = False
     else:
-        comp = MemberChecklistCompletion.objects.create(
+        MemberChecklistCompletion.objects.create(
             checklist_item=item, user=member, completed_by=request.user
         )
-        MemberAuditLog.objects.create(
-            user=member,
-            actor=request.user,
-            action_type="CHECKLIST_COMPLETED",
-            details=item.name,
-        )
+        _log_audit(member, request.user, "CHECKLIST_COMPLETED", item.name)
         completed = True
 
     if is_ajax:
-        actor_name = ""
-        try:
-            main = request.user.profile.main_character
-            if main:
-                actor_name = main.character_name
-        except Exception:
-            actor_name = request.user.username
+        actor_name = _get_character_name(request.user)
         return JsonResponse({
             "completed": completed,
             "completed_by": actor_name if completed else "",
@@ -753,8 +878,8 @@ def acknowledge_review(request, user_id):
     if not note:
         return redirect("codex:review")
 
-    # Use stored rank from MemberRank
-    member_rank = MemberRank.objects.filter(user=member).select_related("rank").first()
+    # Use stored PRIMARY rank from MemberRank
+    member_rank = _get_primary_member_rank(member)
     rank = member_rank.rank if member_rank else None
 
     if rank and not _can_review_member(request.user, rank):
@@ -766,12 +891,7 @@ def acknowledge_review(request, user_id):
             acknowledged_by=request.user,
             note=note,
         )
-        MemberAuditLog.objects.create(
-            user=member,
-            actor=request.user,
-            action_type="REVIEW_ACKNOWLEDGED",
-            details=rank.name,
-        )
+        _log_audit(member, request.user, "REVIEW_ACKNOWLEDGED", rank.name)
 
     return redirect("codex:review")
 
@@ -782,56 +902,70 @@ def set_rank(request, user_id):
         return HttpResponseNotAllowed(["POST"])
 
     user_tiers = _get_user_review_tiers(request.user)
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if not user_tiers:
+        if is_ajax:
+            return JsonResponse({"error": "forbidden"}, status=403)
         return redirect("codex:index")
 
     member = get_object_or_404(User, pk=user_id)
     rank_id = request.POST.get("rank_id", "").strip()
 
-    existing = MemberRank.objects.filter(user=member).select_related("rank").first()
-    old_rank_name = existing.rank.name if existing else None
-
     if not rank_id or rank_id == "0":
-        # Remove rank — only allowed if current rank's tier is within reviewer's tiers (or has no tier)
+        # Remove primary rank
+        existing = _get_primary_member_rank(member)
         if existing and existing.rank.review_tier and existing.rank.review_tier not in user_tiers:
+            if is_ajax:
+                return JsonResponse({"error": "forbidden"}, status=403)
             return redirect("codex:member_detail", user_id=user_id)
         if existing:
+            old_rank_name = existing.rank.name
             existing.delete()
-            MemberAuditLog.objects.create(
-                user=member,
-                actor=request.user,
-                action_type="RANK_CHANGED",
-                details=f"Rank removed (was {old_rank_name})",
-            )
+            _log_audit(member, request.user, "RANK_CHANGED", f"Rank removed (was {old_rank_name})")
     else:
         new_rank = get_object_or_404(Rank, pk=int(rank_id))
-        # Ranks with a review tier require the matching permission; ranks without a tier
-        # (like R3/R4) are assignable by anyone with any review permission.
         if new_rank.review_tier and new_rank.review_tier not in user_tiers:
+            if is_ajax:
+                return JsonResponse({"error": "forbidden"}, status=403)
             return redirect("codex:member_detail", user_id=user_id)
-        if existing:
-            if existing.rank_id != new_rank.pk:
-                existing.rank = new_rank
-                existing.assigned_by = request.user
-                existing.save()
-                MemberAuditLog.objects.create(
+
+        if new_rank.is_primary:
+            # Primary ranks are mutually exclusive — replace any existing PRIMARY
+            existing = _get_primary_member_rank(member)
+            old_rank_name = existing.rank.name if existing else None
+            if existing:
+                if existing.rank_id != new_rank.pk:
+                    existing.rank = new_rank
+                    existing.assigned_by = request.user
+                    existing.save()
+                    _log_audit(member, request.user, "RANK_CHANGED", f"Rank changed from {old_rank_name} to {new_rank.name}")
+            else:
+                MemberRank.objects.create(
                     user=member,
-                    actor=request.user,
-                    action_type="RANK_CHANGED",
-                    details=f"Rank changed from {old_rank_name} to {new_rank.name}",
+                    rank=new_rank,
+                    assigned_by=request.user,
                 )
+                _log_audit(member, request.user, "RANK_CHANGED", f"Rank set to {new_rank.name}")
         else:
-            MemberRank.objects.create(
-                user=member,
-                rank=new_rank,
-                assigned_by=request.user,
-            )
-            MemberAuditLog.objects.create(
-                user=member,
-                actor=request.user,
-                action_type="RANK_CHANGED",
-                details=f"Rank set to {new_rank.name}",
-            )
+            # Special roles: toggle (add if missing, remove if present)
+            existing = MemberRank.objects.filter(user=member, rank=new_rank).first()
+            if existing:
+                existing.delete()
+                _log_audit(member, request.user, "RANK_CHANGED", f"Special role removed: {new_rank.name}")
+            else:
+                MemberRank.objects.create(
+                    user=member,
+                    rank=new_rank,
+                    assigned_by=request.user,
+                )
+                _log_audit(member, request.user, "RANK_CHANGED", f"Special role added: {new_rank.name}")
+
+    if is_ajax:
+        primary_mr = _get_primary_member_rank(member)
+        rank_data = {"id": primary_mr.rank.pk, "label": primary_mr.rank.display_label} if primary_mr else None
+        special_mrs = MemberRank.objects.filter(user=member, rank__rank_type="SPECIAL").select_related("rank")
+        special_data = [{"id": mr.rank.pk, "label": mr.rank.display_label} for mr in special_mrs]
+        return JsonResponse({"success": True, "rank": rank_data, "special_roles": special_data})
 
     return redirect("codex:member_detail", user_id=user_id)
 
@@ -844,8 +978,11 @@ def set_status(request, user_id):
         return HttpResponseNotAllowed(["POST"])
 
     member = get_object_or_404(User, pk=user_id)
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     tag_id = request.POST.get("tag_id", "").strip()
     if not tag_id:
+        if is_ajax:
+            return JsonResponse({"error": "missing tag_id"}, status=400)
         return redirect("codex:member_detail", user_id=user_id)
 
     new_tag = get_object_or_404(Tag, pk=int(tag_id), is_system=True)
@@ -854,12 +991,7 @@ def set_status(request, user_id):
     sibling_tags = Tag.objects.filter(group=new_tag.group, is_system=True).exclude(pk=new_tag.pk)
     removed = MemberTag.objects.filter(user=member, tag__in=sibling_tags)
     for mt in removed.select_related("tag"):
-        MemberAuditLog.objects.create(
-            user=member,
-            actor=request.user,
-            action_type="TAG_REMOVED",
-            details=mt.tag.name,
-        )
+        _log_audit(member, request.user, "TAG_REMOVED", mt.tag.name)
     removed.delete()
 
     # Add the new tag if not already present
@@ -869,12 +1001,10 @@ def set_status(request, user_id):
         defaults={"assigned_by": request.user},
     )
     if created:
-        MemberAuditLog.objects.create(
-            user=member,
-            actor=request.user,
-            action_type="TAG_ADDED",
-            details=new_tag.name,
-        )
+        _log_audit(member, request.user, "TAG_ADDED", new_tag.name)
+
+    if is_ajax:
+        return JsonResponse({"success": True, "tag": {"id": new_tag.pk, "name": new_tag.name, "color": new_tag.color}})
 
     return redirect("codex:member_detail", user_id=user_id)
 
@@ -904,12 +1034,7 @@ def manage_tags(request):
             )
             MemberTag.objects.filter(user=target_user, tag_id__in=to_remove).delete()
             for tag_id in to_remove:
-                MemberAuditLog.objects.create(
-                    user=target_user,
-                    actor=request.user,
-                    action_type="TAG_REMOVED",
-                    details=removed_tag_names.get(tag_id, ""),
-                )
+                _log_audit(target_user, request.user, "TAG_REMOVED", removed_tag_names.get(tag_id, ""))
 
         # Create new tags
         to_add = selected_tag_ids - existing_tag_ids
@@ -922,14 +1047,9 @@ def manage_tags(request):
                 tag_id=tag_id,
                 assigned_by=request.user,
             )
-            MemberAuditLog.objects.create(
-                user=target_user,
-                actor=request.user,
-                action_type="TAG_ADDED",
-                details=added_tag_names.get(tag_id, ""),
-            )
+            _log_audit(target_user, request.user, "TAG_ADDED", added_tag_names.get(tag_id, ""))
 
-        return redirect("codex:index")
+        return redirect("codex:member_list")
 
     # GET: render tag form (exclude system groups)
     tag_groups = TagGroup.objects.filter(is_system=False).prefetch_related("tags")
@@ -952,9 +1072,8 @@ def manage_tags(request):
 
 
 @login_required
+@_review_tier_required
 def former_members(request):
-    if not _get_user_review_tiers(request.user):
-        return redirect("codex:index")
     config = CodexConfiguration.get_solo()
 
     if not config.aa_state:
@@ -1013,7 +1132,6 @@ def member_detail(request, user_id):
         ranks_by_title = {r.eve_title: r for r in Rank.objects.all()}
         acks_by_user = {target_user.pk: list(acks)}
         _assign_default_tags([target_user.pk])
-        _assign_default_ranks([target_user.pk])
         ranks_by_user = _bulk_fetch_ranks([target_user.pk])
         members = _build_members([target_user], ranks_by_title, acks_by_user, tags_by_user, ranks_by_user)
 
@@ -1022,13 +1140,7 @@ def member_detail(request, user_id):
 
     member = members[0]
 
-    # Notes and audit log (visible if user has any review tier permission)
     has_any_review_perm = bool(user_tiers)
-    notes = []
-    audit_logs = []
-    if has_any_review_perm:
-        notes = MemberNote.objects.filter(user=target_user).select_related("author__profile__main_character")
-        audit_logs = MemberAuditLog.objects.filter(user=target_user).select_related("actor__profile__main_character")
 
     # Fetch system status tags for the status selector
     status_group = TagGroup.objects.filter(is_system=True, name="Member Status").first()
@@ -1046,15 +1158,17 @@ def member_detail(request, user_id):
         or request.user.has_perm("codex.manage_tags")
     )
 
+    # Separate primary ranks and special roles for the UI
+    all_primary_ranks = Rank.objects.filter(rank_type="PRIMARY").order_by("priority") if has_any_review_perm else Rank.objects.none()
+    all_special_roles = Rank.objects.filter(rank_type="SPECIAL").order_by("priority") if has_any_review_perm else Rank.objects.none()
+
     context = {
         "member": member,
-        "notes": notes,
-        "audit_logs": audit_logs,
-        "acknowledgements": list(acks),
         "is_former": is_former,
         "can_manage_reviews": has_any_review_perm,
         "can_manage_tags": can_manage_tags,
-        "all_ranks": Rank.objects.order_by("priority") if has_any_review_perm else Rank.objects.none(),
+        "all_ranks": all_primary_ranks,
+        "all_special_roles": all_special_roles,
         "can_set_rank": has_any_review_perm and not is_former,
         "status_tags": status_tags,
         "current_status_tag": current_status_tag,
@@ -1064,9 +1178,38 @@ def member_detail(request, user_id):
 
 
 @login_required
+@_review_tier_required
+def member_notes_partial(request, user_id):
+    target_user = get_object_or_404(User, pk=user_id)
+    notes = MemberNote.objects.filter(user=target_user).select_related(
+        "author__profile__main_character"
+    ).order_by("-created_at")
+    return render(request, "codex/_notes_tab.html", {"notes": notes, "user_id": user_id})
+
+
+@login_required
+@_review_tier_required
+def member_audit_partial(request, user_id):
+    target_user = get_object_or_404(User, pk=user_id)
+    audit_logs = MemberAuditLog.objects.filter(user=target_user).select_related(
+        "actor__profile__main_character"
+    ).order_by("-created_at")
+    return render(request, "codex/_audit_tab.html", {"audit_logs": audit_logs})
+
+
+@login_required
+@permission_required("codex.view_corpmember")
+def member_reviews_partial(request, user_id):
+    target_user = get_object_or_404(User, pk=user_id)
+    acks = ReviewAcknowledgement.objects.filter(user=target_user).select_related(
+        "rank", "acknowledged_by__profile__main_character"
+    ).order_by("-acknowledged_at")
+    return render(request, "codex/_reviews_tab.html", {"acknowledgements": list(acks)})
+
+
+@login_required
+@_review_tier_required
 def add_note(request, user_id):
-    if not _get_user_review_tiers(request.user):
-        return redirect("codex:index")
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
 
@@ -1078,13 +1221,10 @@ def add_note(request, user_id):
             author=request.user,
             content=content,
         )
-        MemberAuditLog.objects.create(
-            user=target_user,
-            actor=request.user,
-            action_type="NOTE_ADDED",
-            details=content[:100],
-        )
+        _log_audit(target_user, request.user, "NOTE_ADDED", content[:100])
 
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True})
     return redirect("codex:member_detail", user_id=user_id)
 
 
@@ -1094,7 +1234,7 @@ def promote_member(request, user_id):
         return HttpResponseNotAllowed(["POST"])
 
     member = get_object_or_404(User, pk=user_id)
-    member_rank = MemberRank.objects.filter(user=member).select_related("rank").first()
+    member_rank = _get_primary_member_rank(member)
     if not member_rank:
         return redirect("codex:review")
 
@@ -1104,8 +1244,10 @@ def promote_member(request, user_id):
     if not _can_review_member(request.user, current_rank):
         return redirect("codex:review")
 
-    # Find the next rank (next higher priority)
-    next_rank = Rank.objects.filter(priority__gt=current_rank.priority).order_by("priority").first()
+    # Find the next PRIMARY rank (next higher priority)
+    next_rank = Rank.objects.filter(
+        priority__gt=current_rank.priority, rank_type="PRIMARY"
+    ).order_by("priority").first()
     if not next_rank:
         return redirect("codex:review")
 
@@ -1123,11 +1265,6 @@ def promote_member(request, user_id):
     member_rank.assigned_by = request.user
     member_rank.save()
 
-    MemberAuditLog.objects.create(
-        user=member,
-        actor=request.user,
-        action_type="RANK_CHANGED",
-        details=f"Promoted from {old_rank_name} to {next_rank.name}",
-    )
+    _log_audit(member, request.user, "RANK_CHANGED", f"Promoted from {old_rank_name} to {next_rank.name}")
 
     return redirect("codex:review")
