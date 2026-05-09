@@ -27,7 +27,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "django>=3.2,<5.0",
+        "django>=3.2,<6.0",
         "allianceauth>=3.0.0"
     ],
     extras_require={
